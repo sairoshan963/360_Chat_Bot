@@ -1,6 +1,7 @@
 import csv
 import io
 
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -41,9 +42,12 @@ class UserListCreateView(APIView):
             qs = qs.filter(department__id=dept)
         if search:
             qs = qs.filter(
-                email__icontains=search
-            ) | qs.filter(first_name__icontains=search) | qs.filter(last_name__icontains=search)
-
+                Q(email__icontains=search)
+                | Q(first_name__icontains=search)
+                | Q(middle_name__icontains=search)
+                | Q(last_name__icontains=search)
+            )
+        qs = qs.order_by('first_name', 'last_name', 'email')
         return Response({'success': True, 'users': UserSerializer(qs, many=True).data})
 
     def post(self, request):
@@ -197,7 +201,10 @@ class OrgHierarchyView(APIView):
         users = User.objects.select_related('department', 'manager_relation__manager').filter(status='ACTIVE')
         data = []
         for u in users:
-            manager_rel = getattr(u, 'manager_relation', None)
+            try:
+                manager_id = str(u.manager_relation.manager.id)
+            except OrgHierarchy.DoesNotExist:
+                manager_id = None
             data.append({
                 'id':          str(u.id),
                 'email':       u.email,
@@ -209,7 +216,7 @@ class OrgHierarchyView(APIView):
                 'status':     u.status,
                 'department': u.department.name if u.department else None,
                 'avatar_url': u.avatar_url,
-                'manager_id': str(manager_rel.manager.id) if manager_rel else None,
+                'manager_id': manager_id,
             })
         return Response({'success': True, 'hierarchy': data})
 

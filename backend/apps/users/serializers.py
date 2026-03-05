@@ -86,12 +86,15 @@ class UpdateUserSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        if manager_id is not None:
-            try:
-                manager = User.objects.get(id=manager_id)
-                OrgHierarchy.objects.update_or_create(employee=instance, defaults={'manager': manager})
-            except User.DoesNotExist:
-                pass
+        if 'manager_id' in self.initial_data:
+            if manager_id is None:
+                OrgHierarchy.objects.filter(employee=instance).delete()
+            else:
+                try:
+                    manager = User.objects.get(id=manager_id)
+                    OrgHierarchy.objects.update_or_create(employee=instance, defaults={'manager': manager})
+                except User.DoesNotExist:
+                    pass
 
         return instance
 

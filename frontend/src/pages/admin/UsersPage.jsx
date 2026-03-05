@@ -3,7 +3,7 @@ import {
   Table, Button, Tag, Space, Modal, Form, Input, Select, AutoComplete,
   Typography, Card, message, Popconfirm,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { listUsers, createUser, updateUser, deleteUser } from '../../api/users';
 import usePageTitle from '../../hooks/usePageTitle';
 
@@ -27,19 +27,22 @@ export default function UsersPage() {
   usePageTitle('Users');
   const [users,   setUsers]   = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [modal,   setModal]   = useState({ open: false, user: null });
   const [form]                = Form.useForm();
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await listUsers();
+      const params = appliedSearch.trim() ? { search: appliedSearch.trim() } : {};
+      const res = await listUsers(params);
       setUsers(res.data.users || []);
     } catch { message.error('Failed to load users'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [appliedSearch]);
 
   const openCreate = () => { form.resetFields(); setModal({ open: true, user: null }); };
   const openEdit   = (u) => {
@@ -82,10 +85,7 @@ export default function UsersPage() {
       onFilter: (v, r) => r.role === v,
     },
     { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={STATUS_COLOR[v]}>{v}</Tag> },
-    {
-      title: 'Reports To',
-      render: (_, r) => { const mgr = users.find((u) => u.id === r.manager_id); return mgr ? [mgr.first_name, mgr.middle_name, mgr.last_name].filter(Boolean).join(' ') : '—'; },
-    },
+    { title: 'Reports To', dataIndex: 'manager_name', render: (v) => v || '—' },
     { title: 'Department', dataIndex: 'department_name', render: (v) => v || '—' },
     {
       title: 'Actions',
@@ -102,8 +102,19 @@ export default function UsersPage() {
 
   return (
     <Card>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>Users</Title>
+      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }} wrap>
+        <Space wrap>
+          <Title level={4} style={{ margin: 0 }}>Users</Title>
+          <Input.Search
+            placeholder="Search by name or email"
+            allowClear
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onSearch={(v) => setAppliedSearch(v ?? '')}
+            style={{ width: 260 }}
+            enterButton={<><SearchOutlined /> Search</>}
+          />
+        </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Add User</Button>
       </Space>
 

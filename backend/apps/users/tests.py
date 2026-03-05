@@ -117,6 +117,23 @@ class TestDepartments:
 
 
 class TestOrgHierarchy:
+    def test_get_hierarchy_returns_flat_list_with_manager_id(self, client, dept):
+        sa  = _make('sa8@test.com', 'SUPER_ADMIN', dept)
+        mgr = _make('mgr@test.com', 'MANAGER', dept)
+        emp = _make('emp4@test.com', 'EMPLOYEE', dept)
+        OrgHierarchy.objects.create(employee=emp, manager=mgr)
+        _login(client, sa)
+        resp = client.get('/api/v1/users/org/hierarchy/')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['success'] is True
+        assert 'hierarchy' in data
+        hierarchy = {str(u['id']): u for u in data['hierarchy']}
+        assert str(emp.id) in hierarchy
+        assert hierarchy[str(emp.id)]['manager_id'] == str(mgr.id)
+        assert str(mgr.id) in hierarchy
+        assert hierarchy[str(mgr.id)]['manager_id'] is None
+
     def test_super_admin_can_set_manager(self, client, dept):
         sa  = _make('sa8@test.com', 'SUPER_ADMIN', dept)
         mgr = _make('mgr@test.com', 'MANAGER', dept)
