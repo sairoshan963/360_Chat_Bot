@@ -125,7 +125,7 @@ export default function OrgPage() {
       setImporting(true);
       try {
         const res = await importOrg(e.target.result);
-        message.success(`Imported ${res.data.imported} user(s)`);
+        message.success(`Imported ${res.data.created} user(s) (${res.data.skipped} skipped)`);
         load();
       } catch (err) {
         message.error(err.response?.data?.message || 'Import failed');

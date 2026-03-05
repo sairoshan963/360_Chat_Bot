@@ -46,7 +46,7 @@ export const createDepartment = (data) => {
 
 export const getOrgHierarchy = () => {
   if (USE_MOCK) return delay({ success: true, hierarchy: ORG_HIERARCHY });
-  return api.get('/org/hierarchy/');
+  return api.get('/users/org/hierarchy/');
 };
 
 export const getOrgHierarchyForUser = (userId) => {
@@ -62,7 +62,9 @@ export const updateManagerRelationship = (userId, data) => {
   return api.post(`/org/hierarchy/${userId}/`, data);
 };
 
-export const importOrg = (csv) => {
-  if (USE_MOCK) return delay({ success: true, rows_imported: 13 });
-  return api.post('/org/import/', { csv });
+export const importOrg = (csvText) => {
+  if (USE_MOCK) return delay({ success: true, imported: 13 });
+  const form = new FormData();
+  form.append('file', new Blob([csvText], { type: 'text/csv' }), 'import.csv');
+  return api.post('/users/import/', form, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
