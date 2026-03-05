@@ -44,7 +44,7 @@ function OrgNode({ data }) {
         <Avatar size={40} style={{ background: ROLE_AVATAR_BG[data.role], flexShrink: 0, fontWeight: 700, fontSize: 14 }}>{initials}</Avatar>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {data.first_name} {data.last_name}
+            {[data.first_name, data.middle_name, data.last_name].filter(Boolean).join(' ')}
           </div>
           <div style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 5 }}>
             {data.email}
@@ -65,9 +65,9 @@ function OrgNode({ data }) {
 
 const nodeTypes = { org: OrgNode };
 
-const CSV_TEMPLATE = `employee_email,first_name,last_name,role,manager_email,department
-alice@gamyam.com,Alice,Smith,EMPLOYEE,manager@gamyam.com,Engineering
-bob@gamyam.com,Bob,Jones,MANAGER,,Engineering`;
+const CSV_TEMPLATE = `email,first_name,middle_name,last_name,role,department
+alice@gamyam.com,Alice,,Smith,EMPLOYEE,Engineering
+bob@gamyam.com,Bob,,Jones,MANAGER,Engineering`;
 
 export default function OrgPage() {
   usePageTitle('Organisation');
@@ -99,7 +99,7 @@ export default function OrgPage() {
     if (search) {
       const q = search.toLowerCase();
       filtered = filtered.filter((u) =>
-        `${u.first_name} ${u.last_name}`.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
+        `${u.first_name || ''} ${u.middle_name || ''} ${u.last_name || ''}`.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
       );
     }
     const visibleIds = new Set(filtered.map((u) => u.id));
@@ -151,14 +151,14 @@ export default function OrgPage() {
           <Avatar size={32} style={{ background: ROLE_AVATAR_BG[r.role], fontSize: 12, fontWeight: 700 }}>
             {`${r.first_name?.[0] ?? ''}${r.last_name?.[0] ?? ''}`.toUpperCase()}
           </Avatar>
-          <span style={{ fontWeight: 500 }}>{r.first_name} {r.last_name}</span>
+          <span style={{ fontWeight: 500 }}>{[r.first_name, r.middle_name, r.last_name].filter(Boolean).join(' ')}</span>
         </Space>
       ),
     },
     { title: 'Email',      dataIndex: 'email' },
     { title: 'Department', dataIndex: 'department', render: (v) => v || '—' },
     { title: 'Role',       dataIndex: 'role', render: (v) => <Tag color={ROLE_TAG_COLOR[v]}>{v.replace('_', ' ')}</Tag> },
-    { title: 'Reports To', dataIndex: 'manager_id', render: (mid) => { const m = org.find((u) => u.id === mid); return m ? `${m.first_name} ${m.last_name}` : '—'; } },
+    { title: 'Reports To', dataIndex: 'manager_id', render: (mid) => { const m = org.find((u) => u.id === mid); return m ? [m.first_name, m.middle_name, m.last_name].filter(Boolean).join(' ') : '—'; } },
     { title: 'Status',     dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'default'}>{v}</Tag> },
   ];
 
@@ -180,7 +180,7 @@ export default function OrgPage() {
             <Button type="primary" icon={<UploadOutlined />} size="small" loading={importing}>Import CSV</Button>
           </Upload>
         </Space>
-        <Alert message="CSV: employee_email, first_name, last_name, role, manager_email (optional), department (optional)" type="info" showIcon style={{ padding: '2px 10px', fontSize: 12 }} />
+        <Alert message="CSV: email, first_name, middle_name (optional), last_name, role, department (optional)" type="info" showIcon style={{ padding: '2px 10px', fontSize: 12 }} />
       </Space>
     </Card>
   );
@@ -234,7 +234,7 @@ export default function OrgPage() {
                     if (deptFilter && u.department !== deptFilter) return false;
                     if (search) {
                       const q = search.toLowerCase();
-                      return `${u.first_name} ${u.last_name}`.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+                      return `${u.first_name || ''} ${u.middle_name || ''} ${u.last_name || ''}`.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
                     }
                     return true;
                   })}

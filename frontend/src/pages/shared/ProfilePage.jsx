@@ -79,9 +79,19 @@ export default function ProfilePage() {
   const handleSaveProfile = async (values) => {
     setSavingProfile(true);
     try {
-      const res = await updateMe({ first_name: values.first_name.trim(), last_name: values.last_name.trim(), job_title: values.job_title?.trim() || null });
+      const res = await updateMe({
+        first_name: values.first_name.trim(),
+        middle_name: values.middle_name?.trim() || null,
+        last_name: values.last_name.trim(),
+        job_title: values.job_title?.trim() || null,
+      });
       const updated = res.data?.user || values;
-      updateUser({ first_name: updated.first_name, last_name: updated.last_name, job_title: updated.job_title });
+      updateUser({
+        first_name: updated.first_name,
+        middle_name: updated.middle_name,
+        last_name: updated.last_name,
+        job_title: updated.job_title,
+      });
       message.success('Profile updated successfully');
     } catch (err) {
       message.error(err.response?.data?.message || err.response?.data?.detail || 'Failed to update profile');
@@ -127,7 +137,7 @@ export default function ProfilePage() {
                 {avatarSrc && <Button size="small" danger icon={<DeleteOutlined />} onClick={handleRemoveAvatar} loading={removing} style={{ borderRadius: 8, fontSize: 12 }}>Remove</Button>}
               </div>
 
-              <div style={{ fontWeight: 700, fontSize: 18, color: '#1e293b', marginBottom: 3 }}>{user?.first_name} {user?.last_name}</div>
+              <div style={{ fontWeight: 700, fontSize: 18, color: '#1e293b', marginBottom: 3 }}>{[user?.first_name, user?.middle_name, user?.last_name].filter(Boolean).join(' ')}</div>
               {user?.job_title && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>{user.job_title}</div>}
               <div style={{ marginBottom: 14 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: ROLE_BG[user?.role], color: ROLE_COLOR[user?.role], fontWeight: 600, fontSize: 12, padding: '4px 12px', borderRadius: 20 }}>
@@ -153,10 +163,11 @@ export default function ProfilePage() {
         <Col xs={24} md={16}>
           <Space direction="vertical" size={20} style={{ width: '100%' }}>
             <Card title={<Space><UserOutlined style={{ color: '#4f46e5' }} /><span>Profile Information</span></Space>} style={{ borderRadius: 14, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-              <Form form={profileForm} layout="vertical" initialValues={{ first_name: user?.first_name, last_name: user?.last_name, job_title: user?.job_title }} onFinish={handleSaveProfile}>
+              <Form form={profileForm} layout="vertical" initialValues={{ first_name: user?.first_name, middle_name: user?.middle_name, last_name: user?.last_name, job_title: user?.job_title }} onFinish={handleSaveProfile}>
                 <Row gutter={16}>
-                  <Col span={12}><Form.Item name="first_name" label="First Name" rules={[{ required: true, message: 'Required' }]}><Input placeholder="First name" /></Form.Item></Col>
-                  <Col span={12}><Form.Item name="last_name"  label="Last Name"  rules={[{ required: true, message: 'Required' }]}><Input placeholder="Last name" /></Form.Item></Col>
+                  <Col span={8}><Form.Item name="first_name"  label="First Name"  rules={[{ required: true, message: 'Required' }]}><Input placeholder="First name" /></Form.Item></Col>
+                  <Col span={8}><Form.Item name="middle_name" label="Middle Name"><Input placeholder="Middle name (optional)" /></Form.Item></Col>
+                  <Col span={8}><Form.Item name="last_name"  label="Last Name"  rules={[{ required: true, message: 'Required' }]}><Input placeholder="Last name" /></Form.Item></Col>
                 </Row>
                 <Form.Item name="job_title" label="Job Title"><Input placeholder="e.g. Senior Engineer, Product Manager" /></Form.Item>
                 <Row gutter={16}>

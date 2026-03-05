@@ -44,7 +44,7 @@ export default function UsersPage() {
   const openCreate = () => { form.resetFields(); setModal({ open: true, user: null }); };
   const openEdit   = (u) => {
     form.setFieldsValue({
-      first_name: u.first_name, last_name: u.last_name, email: u.email,
+      first_name: u.first_name, middle_name: u.middle_name ?? undefined, last_name: u.last_name, email: u.email,
       job_title: u.job_title ?? undefined, role: u.role, status: u.status,
       manager_id: u.manager_id ?? undefined, department: u.department ?? undefined,
     });
@@ -72,7 +72,7 @@ export default function UsersPage() {
   const existingDepts   = [...new Set(users.map((u) => u.department).filter(Boolean))].sort();
 
   const columns = [
-    { title: 'Name',      render: (_, r) => `${r.first_name} ${r.last_name}` },
+    { title: 'Name',      render: (_, r) => [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(' ') },
     { title: 'Job Title', dataIndex: 'job_title', render: (v) => v || '—' },
     { title: 'Email',     dataIndex: 'email' },
     {
@@ -84,7 +84,7 @@ export default function UsersPage() {
     { title: 'Status', dataIndex: 'status', render: (v) => <Tag color={STATUS_COLOR[v]}>{v}</Tag> },
     {
       title: 'Reports To',
-      render: (_, r) => { const mgr = users.find((u) => u.id === r.manager_id); return mgr ? `${mgr.first_name} ${mgr.last_name}` : '—'; },
+      render: (_, r) => { const mgr = users.find((u) => u.id === r.manager_id); return mgr ? [mgr.first_name, mgr.middle_name, mgr.last_name].filter(Boolean).join(' ') : '—'; },
     },
     { title: 'Department', dataIndex: 'department', render: (v) => v || '—' },
     {
@@ -111,8 +111,9 @@ export default function UsersPage() {
 
       <Modal title={modal.user ? 'Edit User' : 'Create User'} open={modal.open} onOk={handleSave} onCancel={() => setModal({ open: false, user: null })} okText="Save" destroyOnClose>
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item name="first_name" label="First Name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="last_name"  label="Last Name"  rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="first_name"  label="First Name"  rules={[{ required: true }]}><Input placeholder="First name" /></Form.Item>
+          <Form.Item name="middle_name" label="Middle Name"><Input placeholder="Middle name (optional)" /></Form.Item>
+          <Form.Item name="last_name"   label="Last Name"   rules={[{ required: true }]}><Input placeholder="Last name" /></Form.Item>
           <Form.Item name="email"      label="Email"      rules={[{ required: true, type: 'email' }]}>
             <Input disabled={!!modal.user} />
           </Form.Item>
@@ -144,7 +145,7 @@ export default function UsersPage() {
           <Form.Item name="manager_id" label="Reports To">
             <Select showSearch allowClear placeholder="Select reporting manager"
               filterOption={(i, o) => o.label.toLowerCase().includes(i.toLowerCase())}
-              options={managerOptions.map((u) => ({ value: u.id, label: `${u.first_name} ${u.last_name} (${u.role.replace('_', ' ')})` }))}
+              options={managerOptions.map((u) => ({ value: u.id, label: `${[u.first_name, u.middle_name, u.last_name].filter(Boolean).join(' ')} (${u.role.replace('_', ' ')})` }))}
             />
           </Form.Item>
         </Form>

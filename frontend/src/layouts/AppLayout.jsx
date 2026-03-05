@@ -170,7 +170,7 @@ export default function AppLayout() {
                       fontWeight: 600, fontSize: 17, color: '#262626',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.4,
                     }}>
-                      {user.first_name} {user.last_name}
+                      {[user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ')}
                     </span>
                     <span style={{
                       fontSize: 14, color: '#8c8c8c', lineHeight: 1.4,
