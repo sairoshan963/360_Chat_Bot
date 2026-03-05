@@ -5,9 +5,9 @@ from .models import User, Department, OrgHierarchy
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display  = ('email', 'first_name', 'last_name', 'role', 'status', 'department', 'created_at')
+    list_display  = ('email', 'first_name', 'middle_name', 'last_name', 'role', 'status', 'department', 'created_at')
     list_filter   = ('role', 'status', 'department')
-    search_fields = ('email', 'first_name', 'last_name')
+    search_fields = ('email', 'first_name', 'middle_name', 'last_name')
     ordering      = ('email',)
 
     fieldsets = (
@@ -21,7 +21,7 @@ class UserAdmin(BaseUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'password1', 'password2', 'first_name', 'last_name', 'role', 'status'),
+            'fields': ('email', 'password1', 'password2', 'first_name', 'middle_name', 'last_name', 'role', 'status'),
         }),
     )
 

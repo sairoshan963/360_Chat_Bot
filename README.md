@@ -316,6 +316,7 @@ VITE_GOOGLE_CLIENT_ID=<your-client-id> docker compose up -d --build
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | `GOCSPX-...` |
 | `EMAIL_HOST_USER` | Gmail address for sending emails | `you@gmail.com` |
 | `EMAIL_HOST_PASSWORD` | Gmail App Password (not regular password) | `abcd efgh ijkl mnop` |
+| `ENABLE_EMAIL_NOTIFICATIONS` | `true` = send real emails; `false` = no delivery (console only, for testing) | `true` or `false` |
 | `FRONTEND_URL` | Frontend URL (used in OAuth redirect + emails) | `http://164.52.215.113:5173` |
 | `SUPERADMIN_EMAIL` | Auto-created admin email | `admin@gamyam.com` |
 | `SUPERADMIN_PASSWORD` | Auto-created admin password | `Admin@123` |
@@ -409,6 +410,20 @@ pytest -v                       # Verbose
 ---
 
 ## Troubleshooting
+
+### Docker: "permission denied while trying to connect to the Docker API"
+
+**Symptom:** `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock`
+
+**Fix:** Add your user to the `docker` group so you can run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Then log out and log back in (or run `newgrp docker` in the same terminal). After that, `docker compose up -d` will work without sudo.
+
+**Quick workaround:** Run with sudo: `sudo docker compose up -d`
 
 ### Backend won't start — DB authentication failed
 

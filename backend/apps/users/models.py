@@ -49,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email       = models.EmailField(unique=True)
     first_name  = models.CharField(max_length=100, blank=True)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
     last_name   = models.CharField(max_length=100, blank=True)
     job_title   = models.CharField(max_length=150, blank=True, null=True)
     role        = models.CharField(max_length=20, choices=ROLE_CHOICES, default='EMPLOYEE')
@@ -72,7 +73,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         return f'{self.get_full_name()} <{self.email}>'
 
     def get_full_name(self):
-        return f'{self.first_name} {self.last_name}'.strip() or self.email
+        parts = [self.first_name, self.middle_name, self.last_name]
+        return ' '.join(p for p in parts if p).strip() or self.email
 
 
 class OrgHierarchy(models.Model):

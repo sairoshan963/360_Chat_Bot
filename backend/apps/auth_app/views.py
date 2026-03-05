@@ -121,6 +121,7 @@ class UpdateProfileView(APIView):
         user = services.update_profile(
             request.user,
             serializer.validated_data['first_name'],
+            serializer.validated_data.get('middle_name') or '',
             serializer.validated_data['last_name'],
             serializer.validated_data.get('job_title', ''),
         )

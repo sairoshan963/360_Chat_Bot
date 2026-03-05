@@ -19,7 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'job_title',
+            'id', 'email', 'first_name', 'middle_name', 'last_name', 'job_title',
             'role', 'status', 'avatar_url',
             'department', 'department_name',
             'manager_id', 'manager_name',
@@ -30,7 +30,7 @@ class UserSerializer(serializers.ModelSerializer):
     def get_manager_name(self, obj):
         try:
             m = obj.manager_relation.manager
-            return f'{m.first_name} {m.last_name}'.strip()
+            return m.get_full_name()
         except Exception:
             return None
 
@@ -42,7 +42,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'email', 'first_name', 'last_name', 'job_title',
+            'email', 'first_name', 'middle_name', 'last_name', 'job_title',
             'role', 'department', 'manager_id', 'password',
         ]
 
@@ -77,7 +77,7 @@ class UpdateUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = User
-        fields = ['first_name', 'last_name', 'job_title', 'role', 'status', 'department', 'manager_id']
+        fields = ['first_name', 'middle_name', 'last_name', 'job_title', 'role', 'status', 'department', 'manager_id']
 
     def update(self, instance, validated_data):
         manager_id = validated_data.pop('manager_id', None)

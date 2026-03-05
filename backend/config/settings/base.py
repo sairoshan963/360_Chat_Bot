@@ -165,8 +165,12 @@ CORS_ALLOWED_ORIGINS = config(
 CORS_ALLOW_CREDENTIALS = True
 
 # ─── Email ────────────────────────────────────────────────────────────────────
-
-EMAIL_BACKEND    = 'django.core.mail.backends.smtp.EmailBackend'
+# Toggle: true = send real emails (SMTP), false = no delivery (console only, for testing)
+ENABLE_EMAIL_NOTIFICATIONS = config('ENABLE_EMAIL_NOTIFICATIONS', default='true', cast=bool)
+if ENABLE_EMAIL_NOTIFICATIONS:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 EMAIL_HOST       = config('EMAIL_HOST',     default='smtp.gmail.com')
 EMAIL_PORT       = config('EMAIL_PORT',     default=587, cast=int)
 EMAIL_USE_TLS    = config('EMAIL_USE_TLS',  default=True, cast=bool)

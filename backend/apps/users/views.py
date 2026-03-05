@@ -93,7 +93,7 @@ class UserDetailView(APIView):
 class UserBulkImportView(APIView):
     """
     POST /api/v1/users/import/
-    Accepts CSV with columns: email, first_name, last_name, job_title, role, department
+    Accepts CSV with columns: email, first_name, middle_name, last_name, job_title, role, department
     """
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
@@ -130,6 +130,7 @@ class UserBulkImportView(APIView):
             user = User(
                 email=email,
                 first_name=(row.get('first_name') or '').strip(),
+                middle_name=(row.get('middle_name') or '').strip() or None,
                 last_name=(row.get('last_name') or '').strip(),
                 job_title=(row.get('job_title') or '').strip() or None,
                 role=role,
@@ -198,11 +199,12 @@ class OrgHierarchyView(APIView):
         for u in users:
             manager_rel = getattr(u, 'manager_relation', None)
             data.append({
-                'id':         str(u.id),
-                'email':      u.email,
-                'first_name': u.first_name,
-                'last_name':  u.last_name,
-                'job_title':  u.job_title,
+                'id':          str(u.id),
+                'email':       u.email,
+                'first_name':  u.first_name,
+                'middle_name': u.middle_name,
+                'last_name':   u.last_name,
+                'job_title':   u.job_title,
                 'role':       u.role,
                 'status':     u.status,
                 'department': u.department.name if u.department else None,
