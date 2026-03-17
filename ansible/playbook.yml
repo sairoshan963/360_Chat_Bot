@@ -6,47 +6,43 @@
 #   ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 #
 # What it does:
-#   1. Pulls latest code from GitHub
+#   1. Rsyncs this repo from the machine running Ansible → server (server need not access GitHub)
 #   2. Rebuilds and restarts Docker containers
-#   3. Verifies all containers are healthy
+#   3. Verifies health
+#
+# Run from a full git checkout: git pull && ./deploy.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 - name: Deploy 360 Feedback Django
   hosts: django_servers
   vars:
     app_path: /opt/360-django
-    repo_url: https://github.com/sairoshan963/360-feedback-django-FS.git
     google_client_id: "581506113726-h32th7jgkc9s6b1l2e5t8mb39vd0o4cn.apps.googleusercontent.com"
 
   tasks:
 
-    - name: Check app directory exists
-      stat:
-        path: "{{ app_path }}"
-      register: app_dir
-
-    - name: Clone repo if not present
-      git:
-        repo: "{{ repo_url }}"
-        dest: "{{ app_path }}"
-        version: main
-        force: no
-      when: not app_dir.stat.exists
-
-    # Shell + timeout avoids indefinite hang (ansible git module / credential prompts on server)
-    - name: Pull latest code from GitHub
-      shell: |
+    # Push code from laptop/CI → server (HTTPS git on server fails without GitHub credentials)
+    - name: Sync codebase to server (rsync over SSH)
+      ansible.builtin.shell: |
         set -e
-        cd "{{ app_path }}"
-        export GIT_TERMINAL_PROMPT=0
-        if ! command -v timeout >/dev/null 2>&1; then
-          git fetch origin main && git reset --hard origin/main
-        else
-          timeout 240 git fetch origin main
-          git reset --hard origin/main
-        fi
-      when: app_dir.stat.exists
-      register: git_pull_out
+        ROOT="$(cd "{{ playbook_dir }}/.." && pwd)"
+        rsync -az \
+          --exclude='.git/' \
+          --exclude='frontend/node_modules/' \
+          --exclude='backend/venv/' \
+          --exclude='.venv-deploy/' \
+          --exclude='backend/.env.docker' \
+          --exclude='backend/.env' \
+          --exclude='backend/.env.local' \
+          --exclude='backend/media/' \
+          --exclude='**/__pycache__/' \
+          --exclude='*.pyc' \
+          --exclude='frontend/dist/' \
+          --exclude='360_React_Nodejs/' \
+          -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+          "$ROOT/" "{{ ansible_user }}@{{ ansible_host }}:{{ app_path }}/"
+      delegate_to: localhost
+      become: false
 
     - name: Verify .env.docker exists (must be on server manually)
       stat:
