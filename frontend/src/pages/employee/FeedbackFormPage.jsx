@@ -7,6 +7,11 @@ import {
 import { SaveOutlined } from '@ant-design/icons';
 import { getTask, saveDraft, submitTask } from '../../api/tasks';
 import usePageTitle from '../../hooks/usePageTitle';
+import {
+  getStandardRatingLabel,
+  getStandardRatingSliderMarks,
+  isStandardFivePointScale,
+} from '../../utils/ratingLabels';
 
 const { Title, Text } = Typography;
 const { Panel }       = Collapse;
@@ -19,12 +24,31 @@ function QuestionField({ question, value, onChange, readOnly }) {
   if (type === 'RATING') {
     const min = rating_scale_min || 1;
     const max = rating_scale_max || 5;
+    const useLabels = isStandardFivePointScale(min, max);
+    const marks = useLabels
+      ? getStandardRatingSliderMarks()
+      : { [min]: String(min), [max]: String(max) };
+    const labelText = value != null && useLabels ? getStandardRatingLabel(value) : null;
     return (
       <Form.Item label={label} help={`${min} = lowest · ${max} = highest`} style={{ marginBottom: 20 }}>
-        <Space>
-          <Slider min={min} max={max} value={value ?? undefined} onChange={readOnly ? undefined : onChange}
-            style={{ width: 220 }} disabled={readOnly} marks={{ [min]: String(min), [max]: String(max) }} />
-          {value != null && <Tag color="blue" style={{ fontSize: 15, padding: '2px 10px' }}>{value}</Tag>}
+        <Space direction="vertical" size={12} style={{ width: '100%', maxWidth: 520 }}>
+          <div style={{ padding: useLabels ? '8px 4px 0' : 0 }}>
+            <Slider
+              min={min}
+              max={max}
+              step={1}
+              value={value ?? undefined}
+              onChange={readOnly ? undefined : onChange}
+              disabled={readOnly}
+              marks={marks}
+              style={{ minWidth: 280 }}
+            />
+          </div>
+          {value != null && (
+            <Tag color="blue" style={{ fontSize: 15, padding: '4px 12px', alignSelf: 'flex-start' }}>
+              {labelText != null ? `${value} — ${labelText}` : String(value)}
+            </Tag>
+          )}
         </Space>
       </Form.Item>
     );

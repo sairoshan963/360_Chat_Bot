@@ -12,6 +12,7 @@ import { getMyCycles } from '../../api/cycles';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getMyReport } from '../../api/reports';
 import ErrorCard from '../../components/shared/ErrorCard';
+import { formatRatingTableCell } from '../../utils/ratingLabels';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -97,7 +98,14 @@ export default function MyReportPage() {
 
   const answerCols = [
     { title: 'Question', dataIndex: 'question_text', width: '50%' },
-    { title: 'Rating',   dataIndex: 'rating_value',  render: (v) => v != null ? <Tag color="blue">{v}</Tag> : '—' },
+    {
+      title: 'Rating',
+      dataIndex: 'rating_value',
+      render: (v) => {
+        const text = formatRatingTableCell(v);
+        return text != null ? <Tag color="blue">{text}</Tag> : '—';
+      },
+    },
     { title: 'Response', dataIndex: 'text_value',     render: (v) => v || '—' },
   ];
 
