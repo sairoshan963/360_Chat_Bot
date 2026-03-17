@@ -33,13 +33,20 @@
         force: no
       when: not app_dir.stat.exists
 
+    # Shell + timeout avoids indefinite hang (ansible git module / credential prompts on server)
     - name: Pull latest code from GitHub
-      git:
-        repo: "{{ repo_url }}"
-        dest: "{{ app_path }}"
-        version: main
-        force: yes
+      shell: |
+        set -e
+        cd "{{ app_path }}"
+        export GIT_TERMINAL_PROMPT=0
+        if ! command -v timeout >/dev/null 2>&1; then
+          git fetch origin main && git reset --hard origin/main
+        else
+          timeout 240 git fetch origin main
+          git reset --hard origin/main
+        fi
       when: app_dir.stat.exists
+      register: git_pull_out
 
     - name: Verify .env.docker exists (must be on server manually)
       stat:
