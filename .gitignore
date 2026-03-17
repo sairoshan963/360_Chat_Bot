@@ -36,3 +36,6 @@ Thumbs.db
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
 *.log
+
+# Local Ansible venv (optional for ./deploy.sh)
+.venv-deploy/

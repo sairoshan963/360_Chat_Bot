@@ -12,18 +12,27 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Ansible requires UTF-8 locale on some systems
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+
 echo "🚀 Deploying 360 Feedback Django to server..."
 echo ""
 
-# Check ansible is installed
+ANSIBLE_PLAYBOOK="ansible-playbook"
 if ! command -v ansible-playbook &>/dev/null; then
-  echo "❌ ansible-playbook not found. Install with:"
-  echo "   pip install ansible   OR   sudo apt install ansible"
-  exit 1
+  if [[ -x "$SCRIPT_DIR/.venv-deploy/bin/ansible-playbook" ]]; then
+    ANSIBLE_PLAYBOOK="$SCRIPT_DIR/.venv-deploy/bin/ansible-playbook"
+  else
+    echo "❌ ansible-playbook not found. Install one of:"
+    echo "   sudo apt install ansible"
+    echo "   python3 -m venv .venv-deploy && .venv-deploy/bin/pip install ansible"
+    exit 1
+  fi
 fi
 
 # Run playbook
-ansible-playbook \
+"$ANSIBLE_PLAYBOOK" \
   -i "$SCRIPT_DIR/ansible/inventory.ini" \
   "$SCRIPT_DIR/ansible/playbook.yml" \
   "$@"
