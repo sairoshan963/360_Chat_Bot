@@ -42,8 +42,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('EMPLOYEE',    'Employee'),
     ]
     STATUS_CHOICES = [
-        ('ACTIVE',   'Active'),
-        ('INACTIVE', 'Inactive'),
+        ('ACTIVE',     'Active'),
+        ('INACTIVE',   'Inactive'),
+        ('SUSPENDED',  'Suspended'),
     ]
 
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
