@@ -150,7 +150,7 @@ export default function CreateCyclePage() {
                 {['ANONYMOUS','SEMI_ANONYMOUS','TRANSPARENT'].map((a) => <Option key={a} value={a}>{a.replace(/_/g,' ')}</Option>)}
               </Select>
             </Form.Item>
-            <Form.Item name="nomination_deadline" label="Nomination Deadline"><DatePicker showTime /></Form.Item>
+            <Form.Item name="nomination_deadline" label="Nomination Deadline" rules={[{ required: true, message: 'Nomination deadline is required when peer review is enabled' }]}><DatePicker showTime /></Form.Item>
             <Form.Item name="nomination_approval_mode" label="Nomination Approval" initialValue="AUTO">
               <Select style={{ width: 220 }}>
                 <Option value="AUTO">Auto-approve (immediate)</Option>
