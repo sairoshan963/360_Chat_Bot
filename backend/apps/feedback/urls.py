@@ -14,6 +14,9 @@ urlpatterns = [
     # Manager / HR / Super Admin: specific employee report
     path('cycles/<uuid:cycle_id>/reports/<uuid:employee_id>/', views.EmployeeReportView.as_view(), name='employee-report'),
 
-    # Super Admin: Excel export
+    # Super Admin: Excel export (single employee)
     path('cycles/<uuid:cycle_id>/reports/<uuid:employee_id>/export/', views.ExportReportView.as_view(), name='export-report'),
+
+    # HR Admin: bulk Excel export (all employees in a cycle)
+    path('cycles/<uuid:cycle_id>/reports/export-all/', views.ExportAllReportsView.as_view(), name='export-all-reports'),
 ]

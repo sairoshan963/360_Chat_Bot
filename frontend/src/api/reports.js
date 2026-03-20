@@ -25,6 +25,11 @@ export const exportEmployeeReport = (cycleId, employeeId) => {
   return api.get(`/feedback/cycles/${cycleId}/reports/${employeeId}/export/`, { responseType: 'blob' });
 };
 
+export const exportAllReports = (cycleId) => {
+  if (USE_MOCK) return Promise.resolve({ data: new Blob() });
+  return api.get(`/feedback/cycles/${cycleId}/reports/export-all/`, { responseType: 'blob' });
+};
+
 export const getHrDashboard = (cycleId) => {
   if (USE_MOCK) {
     const dashboard = HR_DASHBOARD[cycleId] || HR_DASHBOARD['c-002'];

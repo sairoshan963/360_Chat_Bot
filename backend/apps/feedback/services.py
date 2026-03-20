@@ -337,3 +337,140 @@ def export_employee_report_excel(cycle_id, employee_id, actor):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+# ─── Bulk Excel Export (all employees in a cycle) ─────────────────────────────
+
+def export_all_reports_excel(cycle_id, actor):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+
+    try:
+        cycle = ReviewCycle.objects.get(id=cycle_id)
+    except ReviewCycle.DoesNotExist:
+        raise NotFound('Cycle not found')
+
+    if cycle.state not in ['RESULTS_RELEASED', 'ARCHIVED']:
+        raise PermissionDenied('Results are not yet released')
+
+    participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
+
+    header_fill       = PatternFill('solid', fgColor='1677FF')
+    header_font_white = Font(bold=True, color='FFFFFF', size=11)
+    section_font      = Font(bold=True, size=11)
+    center            = Alignment(horizontal='center')
+
+    wb = openpyxl.Workbook()
+
+    # ── Sheet 1: Summary ──────────────────────────────────────────────────────
+    ws_sum = wb.active
+    ws_sum.title = 'Summary'
+
+    summary_headers = ['Employee', 'Email', 'Department', 'Overall', 'Self', 'Manager', 'Peer']
+    ws_sum.append(summary_headers)
+    for col, _ in enumerate(summary_headers, 1):
+        cell = ws_sum.cell(row=1, column=col)
+        cell.font      = header_font_white
+        cell.fill      = header_fill
+        cell.alignment = center
+
+    for p in participants:
+        emp = p.user
+        try:
+            agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
+            overall = round(float(agg.overall_score), 2) if agg.overall_score else '—'
+            self_s  = round(float(agg.self_score),    2) if agg.self_score    else '—'
+            mgr_s   = round(float(agg.manager_score), 2) if agg.manager_score else '—'
+            peer_s  = round(float(agg.peer_score),    2) if agg.peer_score    else '—'
+        except AggregatedResult.DoesNotExist:
+            overall = self_s = mgr_s = peer_s = '—'
+
+        ws_sum.append([
+            emp.get_full_name(),
+            emp.email,
+            emp.department.name if emp.department else '—',
+            overall, self_s, mgr_s, peer_s,
+        ])
+
+    ws_sum.column_dimensions['A'].width = 25
+    ws_sum.column_dimensions['B'].width = 30
+    ws_sum.column_dimensions['C'].width = 20
+    for col in ['D', 'E', 'F', 'G']:
+        ws_sum.column_dimensions[col].width = 12
+
+    # ── One sheet per employee ────────────────────────────────────────────────
+    for p in participants:
+        emp = p.user
+        sheet_name = emp.get_full_name()[:31]  # Excel sheet name limit
+        ws = wb.create_sheet(title=sheet_name)
+
+        # Title block
+        ws.append(['360° Feedback Report'])
+        ws['A1'].font = Font(bold=True, size=14)
+        ws.append(['Cycle',     cycle.name])
+        ws.append(['Employee',  emp.get_full_name()])
+        ws.append(['Email',     emp.email])
+        ws.append(['Job Title', emp.job_title or '—'])
+        ws.append([])
+
+        # Scores
+        ws.append(['Score Summary'])
+        ws.cell(row=ws.max_row, column=1).font = section_font
+        try:
+            agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
+            ws.append([
+                'Overall', round(float(agg.overall_score), 2) if agg.overall_score else '—',
+                'Self',    round(float(agg.self_score),    2) if agg.self_score    else '—',
+                'Manager', round(float(agg.manager_score), 2) if agg.manager_score else '—',
+                'Peer',    round(float(agg.peer_score),    2) if agg.peer_score    else '—',
+            ])
+        except AggregatedResult.DoesNotExist:
+            ws.append(['No aggregated scores available'])
+        ws.append([])
+
+        # Detailed answers header
+        header_row = ws.max_row + 1
+        ws.append(['Reviewer Type', 'Reviewer', 'Question', 'Rating', 'Text Response'])
+        for col in range(1, 6):
+            cell = ws.cell(row=header_row, column=col)
+            cell.font      = header_font_white
+            cell.fill      = header_fill
+            cell.alignment = center
+
+        # Answers (HR always sees identity)
+        sections = _get_feedback_sections(cycle, emp, actor.role, actor)
+        for section in sections:
+            if section.get('hidden'):
+                reviewer_name = 'Anonymous'
+            else:
+                identity = section.get('identity') or {}
+                reviewer_name = f"{identity.get('first_name', '')} {identity.get('last_name', '')}".strip() or 'Unknown'
+
+            for ans in section.get('answers', []):
+                ws.append([
+                    section['reviewer_type'],
+                    reviewer_name,
+                    ans['question_text'],
+                    ans['rating_value'] if ans['rating_value'] is not None else '',
+                    ans['text_value'] or '',
+                ])
+
+        ws.column_dimensions['A'].width = 16
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 40
+
+    AuditLog.log(actor=actor, action='EXPORT_REPORT', entity_type='report',
+                 entity_id=cycle_id, new_value={
+                     'exported_by': actor.get_full_name(),
+                     'cycle': cycle.name,
+                     'format': 'xlsx_bulk',
+                     'participant_count': participants.count(),
+                 })
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

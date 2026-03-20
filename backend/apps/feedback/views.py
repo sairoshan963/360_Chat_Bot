@@ -89,3 +89,27 @@ class ExportReportView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+# ─── Bulk Excel Export (all employees in a cycle) ─────────────────────────────
+
+class ExportAllReportsView(APIView):
+    """HR Admin: download all employees' reports for a cycle as one Excel file."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request, cycle_id):
+        buffer = services.export_all_reports_excel(cycle_id, request.user)
+
+        from apps.review_cycles.models import ReviewCycle
+        try:
+            cycle = ReviewCycle.objects.get(id=cycle_id)
+            filename = f'360_all_reports_{cycle.name.replace(" ", "_")}_{cycle_id}.xlsx'
+        except Exception:
+            filename = f'360_all_reports_{cycle_id}.xlsx'
+
+        response = HttpResponse(
+            buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response

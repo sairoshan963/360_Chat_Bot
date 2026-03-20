@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Select, Button, Space, Typography, Table, Tag, message, Empty } from 'antd';
-import { EyeOutlined } from '@ant-design/icons';
+import { EyeOutlined, FileExcelOutlined } from '@ant-design/icons';
 import { listCycles, getParticipants } from '../../api/cycles';
+import { exportAllReports } from '../../api/reports';
 import usePageTitle from '../../hooks/usePageTitle';
 
 const { Title } = Typography;
@@ -17,6 +18,7 @@ export default function ViewReportsPage() {
   const [cycleId,      setCycleId]      = useState('');
   const [participants, setParticipants] = useState([]);
   const [loading,      setLoading]      = useState(false);
+  const [exporting,    setExporting]    = useState(false);
 
   useEffect(() => {
     listCycles().then((r) => {
@@ -42,6 +44,26 @@ export default function ViewReportsPage() {
 
   const selectedCycle = cycles.find((c) => String(c.id) === String(cycleId));
 
+  const handleExportAll = async () => {
+    if (!cycleId) return;
+    setExporting(true);
+    try {
+      const res = await exportAllReports(cycleId);
+      const url  = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href  = url;
+      link.setAttribute('download', `360_all_reports_${selectedCycle?.name || cycleId}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      message.error('Failed to export reports');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card>
@@ -58,7 +80,19 @@ export default function ViewReportsPage() {
 
       {!cycleId && <Card><Empty description="Select a cycle to view employee reports" /></Card>}
       {cycleId && (
-        <Card title={`Participants (${participants.length})`}>
+        <Card
+          title={`Participants (${participants.length})`}
+          extra={
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportAll}
+              loading={exporting}
+              disabled={participants.length === 0}
+            >
+              Export All to Excel
+            </Button>
+          }
+        >
           <Table rowKey="id" columns={columns} dataSource={participants} loading={loading} pagination={{ pageSize: 10 }} />
         </Card>
       )}
