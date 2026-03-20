@@ -54,6 +54,19 @@ class UserListCreateView(APIView):
         serializer = CreateUserSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_CREATED',
+            entity_type='user', entity_id=user.id,
+            new_value={
+                'email': user.email,
+                'name': user.get_full_name(),
+                'role': user.role,
+                'status': user.status,
+            },
+        )
+
         return Response({'success': True, 'user': UserSerializer(user).data}, status=201)
 
 
@@ -76,9 +89,33 @@ class UserDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({'success': False, 'error': 'User not found'}, status=404)
+
+        old_value = {
+            'email': user.email,
+            'name': user.get_full_name(),
+            'role': user.role,
+            'status': user.status,
+            'job_title': user.job_title,
+        }
+
         serializer = UpdateUserSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_UPDATED',
+            entity_type='user', entity_id=updated.id,
+            old_value=old_value,
+            new_value={
+                'email': updated.email,
+                'name': updated.get_full_name(),
+                'role': updated.role,
+                'status': updated.status,
+                'job_title': updated.job_title,
+            },
+        )
+
         return Response({'success': True, 'user': UserSerializer(updated).data})
 
     def delete(self, request, pk):
@@ -89,6 +126,14 @@ class UserDetailView(APIView):
             return Response({'success': False, 'error': 'Cannot deactivate your own account'}, status=400)
         user.status = 'INACTIVE'
         user.save(update_fields=['status'])
+
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_DEACTIVATED',
+            entity_type='user', entity_id=user.id,
+            new_value={'email': user.email, 'name': user.get_full_name()},
+        )
+
         return Response({'success': True, 'message': 'User deactivated'})
 
 

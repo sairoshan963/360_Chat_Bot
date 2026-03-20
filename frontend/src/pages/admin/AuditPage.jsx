@@ -15,20 +15,24 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const ACTION_META = {
-  CREATE_CYCLE:     { color: 'blue',     label: 'Create Cycle',     badge: 'processing' },
-  CLOSE_CYCLE:      { color: 'orange',   label: 'Close Cycle',      badge: 'warning' },
-  RELEASE_RESULTS:  { color: 'green',    label: 'Release Results',  badge: 'success' },
-  SUBMIT_FEEDBACK:  { color: 'cyan',     label: 'Submit Feedback',  badge: 'processing' },
-  SUBMIT_DRAFT:     { color: 'geekblue', label: 'Save Draft',       badge: 'default' },
-  IDENTITY_ACCESS:  { color: 'red',      label: 'Identity Access',  badge: 'error' },
-  OVERRIDE_ACTION:  { color: 'volcano',  label: 'Override',         badge: 'error' },
-  CREATE_USER:      { color: 'purple',   label: 'Create User',      badge: 'processing' },
-  IMPORT_ORG:       { color: 'geekblue', label: 'Import Org',       badge: 'processing' },
-  EXPORT_REPORT:    { color: 'gold',     label: 'Export Report',    badge: 'default' },
-  VIEW_REPORT:      { color: 'lime',     label: 'View Report',      badge: 'default' },
-  APPROVE_NOMINATION: { color: 'green', label: 'Approve Nomination', badge: 'success' },
-  REJECT_NOMINATION:  { color: 'red',   label: 'Reject Nomination',  badge: 'error' },
-  FINALIZE_CYCLE:   { color: 'blue',    label: 'Finalize Cycle',    badge: 'processing' },
+  CREATE_CYCLE:        { color: 'blue',     label: 'Create Cycle',        badge: 'processing' },
+  CLOSE_CYCLE:         { color: 'orange',   label: 'Close Cycle',         badge: 'warning' },
+  RELEASE_RESULTS:     { color: 'green',    label: 'Release Results',     badge: 'success' },
+  SUBMIT_FEEDBACK:     { color: 'cyan',     label: 'Submit Feedback',     badge: 'processing' },
+  SUBMIT_DRAFT:        { color: 'geekblue', label: 'Save Draft',          badge: 'default' },
+  IDENTITY_ACCESS:     { color: 'red',      label: 'Identity Access',     badge: 'error' },
+  OVERRIDE_ACTION:     { color: 'volcano',  label: 'Override',            badge: 'error' },
+  CREATE_USER:         { color: 'purple',   label: 'Create User',         badge: 'processing' },
+  USER_CREATED:        { color: 'purple',   label: 'User Created',        badge: 'processing' },
+  USER_UPDATED:        { color: 'blue',     label: 'User Updated',        badge: 'processing' },
+  USER_DEACTIVATED:    { color: 'orange',   label: 'User Deactivated',    badge: 'warning' },
+  ADMIN_PASSWORD_RESET:{ color: 'gold',     label: 'Password Reset',      badge: 'warning' },
+  IMPORT_ORG:          { color: 'geekblue', label: 'Import Org',          badge: 'processing' },
+  EXPORT_REPORT:       { color: 'gold',     label: 'Export Report',       badge: 'default' },
+  VIEW_REPORT:         { color: 'lime',     label: 'View Report',         badge: 'default' },
+  APPROVE_NOMINATION:  { color: 'green',    label: 'Approve Nomination',  badge: 'success' },
+  REJECT_NOMINATION:   { color: 'red',      label: 'Reject Nomination',   badge: 'error' },
+  FINALIZE_CYCLE:      { color: 'blue',     label: 'Finalize Cycle',      badge: 'processing' },
 };
 
 const ALL_ACTIONS = Object.keys(ACTION_META);
