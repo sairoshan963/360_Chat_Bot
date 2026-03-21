@@ -26,14 +26,15 @@ def _token_for_user(user):
 
 def _user_data(user):
     return {
-        'id':          str(user.id),
-        'email':       user.email,
-        'first_name':  user.first_name,
-        'middle_name': user.middle_name,
-        'last_name':   user.last_name,
-        'job_title':  user.job_title,
-        'role':       user.role,
-        'avatar_url': user.avatar_url,
+        'id':           str(user.id),
+        'email':        user.email,
+        'first_name':   user.first_name,
+        'middle_name':  user.middle_name,
+        'last_name':    user.last_name,
+        'display_name': user.display_name,
+        'job_title':    user.job_title,
+        'role':         user.role,
+        'avatar_url':   user.avatar_url,
     }
 
 
@@ -94,12 +95,13 @@ def get_me(user_id):
 
 # ─── Profile Update ───────────────────────────────────────────────────────────
 
-def update_profile(user, first_name, middle_name, last_name, job_title):
-    user.first_name  = first_name.strip()
-    user.middle_name = middle_name.strip() if middle_name else None
-    user.last_name   = last_name.strip()
-    user.job_title   = job_title.strip() if job_title else None
-    user.save(update_fields=['first_name', 'middle_name', 'last_name', 'job_title', 'updated_at'])
+def update_profile(user, first_name, middle_name, last_name, display_name, job_title):
+    user.first_name   = first_name.strip()
+    user.middle_name  = middle_name.strip() if middle_name else None
+    user.last_name    = last_name.strip()
+    user.display_name = display_name.strip() if display_name else None
+    user.job_title    = job_title.strip() if job_title else None
+    user.save(update_fields=['first_name', 'middle_name', 'last_name', 'display_name', 'job_title', 'updated_at'])
     return user
 
 

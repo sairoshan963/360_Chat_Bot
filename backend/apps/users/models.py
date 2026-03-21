@@ -55,6 +55,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     job_title   = models.CharField(max_length=150, blank=True, null=True)
     role        = models.CharField(max_length=20, choices=ROLE_CHOICES, default='EMPLOYEE')
     status      = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ACTIVE')
+    display_name = models.CharField(max_length=100, blank=True, null=True)
     avatar_url  = models.URLField(blank=True, null=True)
     department  = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL, related_name='members')
     is_staff    = models.BooleanField(default=False)
@@ -76,6 +77,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_full_name(self):
         parts = [self.first_name, self.middle_name, self.last_name]
         return ' '.join(p for p in parts if p).strip() or self.email
+
+    def get_display_name(self):
+        return self.display_name.strip() if self.display_name and self.display_name.strip() else self.get_full_name()
 
 
 class OrgHierarchy(models.Model):

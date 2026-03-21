@@ -30,7 +30,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 class UpdateProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
-        fields = ['first_name', 'middle_name', 'last_name', 'job_title']
+        fields = ['first_name', 'middle_name', 'last_name', 'display_name', 'job_title']
 
     def validate_first_name(self, value):
         if not value or not value.strip():
@@ -49,6 +49,6 @@ class UserMeSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = [
-            'id', 'email', 'first_name', 'middle_name', 'last_name', 'job_title',
+            'id', 'email', 'first_name', 'middle_name', 'last_name', 'display_name', 'job_title',
             'role', 'status', 'avatar_url', 'department_name', 'last_login_at',
         ]
