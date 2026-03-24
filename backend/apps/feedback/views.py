@@ -1,7 +1,14 @@
+import re
+
 from django.http import HttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+
+def _safe_filename(name):
+    """Strip characters that break Content-Disposition headers or file systems."""
+    return re.sub(r'[^\w\-. ]', '_', name).strip()
 
 from shared.permissions import IsEmployee, IsHRAdmin, IsHROrManager, IsSuperAdmin
 from . import services
@@ -79,7 +86,7 @@ class ExportReportView(APIView):
         from apps.users.models import User
         try:
             emp = User.objects.get(id=employee_id)
-            filename = f'360_report_{emp.last_name}_{emp.first_name}_{cycle_id}.xlsx'
+            filename = _safe_filename(f'360_report_{emp.last_name}_{emp.first_name}') + '.xlsx'
         except Exception:
             filename = f'360_report_{employee_id}.xlsx'
 
@@ -103,7 +110,7 @@ class ExportAllReportsView(APIView):
         from apps.review_cycles.models import ReviewCycle
         try:
             cycle = ReviewCycle.objects.get(id=cycle_id)
-            filename = f'360_all_reports_{cycle.name.replace(" ", "_")}_{cycle_id}.xlsx'
+            filename = _safe_filename(f'360_all_reports_{cycle.name}') + '.xlsx'
         except Exception:
             filename = f'360_all_reports_{cycle_id}.xlsx'
 

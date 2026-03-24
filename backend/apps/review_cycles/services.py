@@ -86,6 +86,29 @@ def get_template(template_id):
         raise NotFound('Template not found')
 
 
+VALID_QUESTION_TYPES = [t[0] for t in TemplateQuestion.QUESTION_TYPE_CHOICES]
+
+
+def _validate_question(q):
+    """Validate a single question dict. Raises ValidationError on bad data."""
+    q_type = q.get('type', 'RATING')
+    if q_type not in VALID_QUESTION_TYPES:
+        raise ValidationError(f'Invalid question type: {q_type}. Must be one of {VALID_QUESTION_TYPES}')
+    if q_type == 'RATING':
+        r_min = q.get('rating_scale_min')
+        r_max = q.get('rating_scale_max')
+        if r_min is None or r_max is None:
+            raise ValidationError('rating_scale_min and rating_scale_max are required for RATING questions')
+        if not isinstance(r_min, int) or not isinstance(r_max, int):
+            raise ValidationError('rating_scale_min and rating_scale_max must be integers')
+        if r_min < 1:
+            raise ValidationError('rating_scale_min must be ≥ 1')
+        if r_max > 10:
+            raise ValidationError('rating_scale_max must be ≤ 10')
+        if r_min >= r_max:
+            raise ValidationError('rating_scale_min must be less than rating_scale_max')
+
+
 def create_template(name, description, sections, actor):
     if not name:
         raise ValidationError('Template name is required')
@@ -105,6 +128,7 @@ def create_template(name, description, sections, actor):
                 display_order=sec.get('display_order', i + 1),
             )
             for j, q in enumerate(sec.get('questions') or []):
+                _validate_question(q)
                 TemplateQuestion.objects.create(
                     section=section,
                     question_text=q['question_text'].strip(),
@@ -140,6 +164,7 @@ def update_template(template_id, name, sections, actor):
                 display_order=i + 1,
             )
             for j, q in enumerate(sec.get('questions') or []):
+                _validate_question(q)
                 TemplateQuestion.objects.create(
                     section=section,
                     question_text=q['question_text'].strip(),
@@ -190,6 +215,7 @@ def create_cycle(data, actor):
         raise NotFound('Template not found or inactive')
 
     peer_enabled = data.get('peer_enabled', False)
+    nomination_deadline = data.get('nomination_deadline')
     if peer_enabled:
         peer_min = data.get('peer_min_count')
         peer_max = data.get('peer_max_count')
@@ -199,6 +225,11 @@ def create_cycle(data, actor):
             raise ValidationError('peer_min_count must be ≤ peer_max_count')
         if peer_min < 1:
             raise ValidationError('peer_min_count must be ≥ 1')
+        if not nomination_deadline:
+            raise ValidationError('nomination_deadline is required when peer_enabled')
+
+    if nomination_deadline and nomination_deadline >= review_deadline:
+        raise ValidationError('nomination_deadline must be before review_deadline')
 
     valid_anonymity = [a[0] for a in ReviewCycle.ANONYMITY_CHOICES]
     for field in ['peer_anonymity', 'manager_anonymity', 'self_anonymity']:
@@ -238,6 +269,34 @@ def update_cycle(cycle_id, data, actor):
     cycle = _get_cycle_or_404(cycle_id)
     if cycle.state != 'DRAFT':
         raise ValidationError('Cycle can only be updated in DRAFT state')
+
+    # ── Peer settings validation ──────────────────────────────────────────────
+    peer_enabled = data.get('peer_enabled', cycle.peer_enabled)
+    if peer_enabled:
+        peer_min = data.get('peer_min_count', cycle.peer_min_count)
+        peer_max = data.get('peer_max_count', cycle.peer_max_count)
+        if not peer_min or not peer_max:
+            raise ValidationError('peer_min_count and peer_max_count are required when peer_enabled')
+        if peer_min < 1:
+            raise ValidationError('peer_min_count must be ≥ 1')
+        if peer_min > peer_max:
+            raise ValidationError('peer_min_count must be ≤ peer_max_count')
+        nomination_deadline = data.get('nomination_deadline', cycle.nomination_deadline)
+        if not nomination_deadline:
+            raise ValidationError('nomination_deadline is required when peer_enabled')
+
+    # ── Anonymity choices validation ──────────────────────────────────────────
+    valid_anonymity = [a[0] for a in ReviewCycle.ANONYMITY_CHOICES]
+    for field in ['peer_anonymity', 'manager_anonymity', 'self_anonymity']:
+        val = data.get(field)
+        if val and val not in valid_anonymity:
+            raise ValidationError(f'Invalid {field} value: {val}')
+
+    # ── Deadline ordering validation ──────────────────────────────────────────
+    review_deadline     = data.get('review_deadline', cycle.review_deadline)
+    nomination_deadline = data.get('nomination_deadline', cycle.nomination_deadline)
+    if nomination_deadline and review_deadline and nomination_deadline >= review_deadline:
+        raise ValidationError('nomination_deadline must be before review_deadline')
 
     allowed = ['name', 'description', 'peer_enabled', 'peer_min_count', 'peer_max_count',
                'peer_threshold', 'peer_anonymity', 'manager_anonymity', 'self_anonymity',
@@ -398,6 +457,14 @@ def release_results(cycle_id, actor):
         cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
         if cycle.state != 'CLOSED':
             raise ValidationError(f'Cannot release results from state: {cycle.state}')
+
+        from apps.reviewer_workflow.models import ReviewerTask
+        submitted_count = ReviewerTask.objects.filter(cycle=cycle, status='SUBMITTED').count()
+        if submitted_count == 0:
+            raise ValidationError(
+                'No submitted feedback found for this cycle. '
+                'Release results only after at least one feedback is submitted.'
+            )
 
         # Run aggregation
         from apps.feedback.services import aggregate_cycle

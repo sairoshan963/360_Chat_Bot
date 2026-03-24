@@ -86,15 +86,18 @@ def submit_nominations(cycle_id, user, peer_ids):
     if not CycleParticipant.objects.filter(cycle=cycle, user=user).exists():
         raise PermissionDenied('You are not a participant in this cycle')
 
+    # Deduplicate peer_ids while preserving intent — duplicates are a client bug
+    peer_ids = list(dict.fromkeys(str(p) for p in peer_ids))
+
+    # Cannot nominate yourself
+    if str(user.id) in peer_ids:
+        raise ValidationError('You cannot nominate yourself')
+
     if cycle.peer_max_count and len(peer_ids) > cycle.peer_max_count:
         raise ValidationError(f'You can nominate at most {cycle.peer_max_count} peers')
 
     if cycle.peer_min_count and len(peer_ids) < cycle.peer_min_count:
         raise ValidationError(f'You must nominate at least {cycle.peer_min_count} peers')
-
-    # Cannot nominate yourself
-    if str(user.id) in [str(p) for p in peer_ids]:
-        raise ValidationError('You cannot nominate yourself')
 
     auto_approve = cycle.nomination_approval_mode == 'AUTO'
     status       = 'APPROVED' if auto_approve else 'PENDING'

@@ -46,6 +46,9 @@ def login(email, password):
     except User.DoesNotExist:
         raise AuthenticationFailed('Invalid email or password')
 
+    if user.status == 'SUSPENDED':
+        raise PermissionDenied('Your account has been suspended. Contact HR.')
+
     if user.status != 'ACTIVE':
         raise PermissionDenied('Account is not active')
 
@@ -65,6 +68,9 @@ def login_with_google(google_email, given_name='', family_name=''):
         user = User.objects.get(email=google_email)
     except User.DoesNotExist:
         raise PermissionDenied('No account linked to this email. Contact HR.')
+
+    if user.status == 'SUSPENDED':
+        raise PermissionDenied('Your account has been suspended. Contact HR.')
 
     if user.status != 'ACTIVE':
         raise PermissionDenied('Account is not active')

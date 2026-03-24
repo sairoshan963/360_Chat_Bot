@@ -194,6 +194,17 @@ class UserBulkImportView(APIView):
         if not file:
             return Response({'success': False, 'error': 'No file uploaded'}, status=400)
 
+        # ── File type validation ──────────────────────────────────────────────
+        import os
+        ext = os.path.splitext(file.name)[1].lower()
+        if ext not in ['.csv']:
+            return Response({'success': False, 'error': 'Only CSV files are allowed'}, status=400)
+
+        # ── File size limit: 5 MB ─────────────────────────────────────────────
+        MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+        if file.size > MAX_SIZE:
+            return Response({'success': False, 'error': 'File too large. Maximum size is 5 MB.'}, status=400)
+
         content = file.read().decode('utf-8-sig')  # handle BOM from Excel exports
         reader  = csv.DictReader(io.StringIO(content))
         created = 0
@@ -260,6 +271,9 @@ class UserBulkImportView(APIView):
         manager_linked = 0
         manager_errors = []
         for emp_email, mgr_email in manager_assignments:
+            if emp_email == mgr_email:
+                manager_errors.append(f'{emp_email}: cannot be their own manager')
+                continue
             try:
                 emp = User.objects.get(email=emp_email)
                 mgr = User.objects.get(email=mgr_email)
@@ -330,6 +344,11 @@ class DepartmentDetailView(APIView):
 class OrgHierarchyView(APIView):
     """Returns org hierarchy filtered by the requesting user's role."""
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), IsHRAdmin()]
+        return [IsAuthenticated()]
 
     def _subtree_ids(self, root_id, all_users_by_manager):
         """Recursively collect IDs of root and all descendants."""

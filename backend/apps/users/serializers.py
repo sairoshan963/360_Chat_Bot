@@ -63,6 +63,8 @@ class CreateUserSerializer(serializers.ModelSerializer):
         user.save()
 
         if manager_id:
+            if str(manager_id) == str(user.id):
+                raise serializers.ValidationError({'manager_id': 'A user cannot be their own manager'})
             try:
                 manager = User.objects.get(id=manager_id)
                 OrgHierarchy.objects.update_or_create(employee=user, defaults={'manager': manager})
@@ -90,6 +92,8 @@ class UpdateUserSerializer(serializers.ModelSerializer):
             if manager_id is None:
                 OrgHierarchy.objects.filter(employee=instance).delete()
             else:
+                if str(manager_id) == str(instance.id):
+                    raise serializers.ValidationError({'manager_id': 'A user cannot be their own manager'})
                 try:
                     manager = User.objects.get(id=manager_id)
                     OrgHierarchy.objects.update_or_create(employee=instance, defaults={'manager': manager})

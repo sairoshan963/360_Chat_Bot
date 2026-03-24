@@ -1,5 +1,9 @@
+import logging
+
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Shared HTML wrapper ──────────────────────────────────────────────────────
@@ -75,7 +79,8 @@ def _send(subject, to_email, plain_text, html):
         msg.attach_alternative(html, 'text/html')
         msg.send(fail_silently=False)
         return True
-    except Exception:
+    except Exception as exc:
+        logger.error('Email send failed to %s (subject: %s): %s', to_email, subject, exc, exc_info=True)
         return False
 
 

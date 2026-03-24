@@ -142,6 +142,10 @@ class ChangePasswordView(APIView):
             serializer.validated_data['current_password'],
             serializer.validated_data['new_password'],
         )
+        from apps.audit.models import AuditLog
+        AuditLog.log(actor=request.user, action='CHANGE_PASSWORD',
+                     entity_type='user', entity_id=request.user.id,
+                     new_value={'changed_by': 'self'})
         return Response({'success': True, 'message': 'Password updated successfully'})
 
 
