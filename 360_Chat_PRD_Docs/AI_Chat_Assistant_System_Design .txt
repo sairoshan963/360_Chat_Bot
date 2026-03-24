@@ -1,0 +1,492 @@
+
+
+
+
+
+
+
+
+System Design Document
+AI Chat Assistant for 360° Feedback System
+High-Level Design (HLD) + Low-Level Design (LLD)
+
+
+VERSION1.0STATUSDraftDATEMarch 10, 2026MODULE360° Feedback - Phase 1TYPESystem Design (HLD + LLD)
+
+
+
+
+
+360° Feedback System    Enterprise AI Solutions
+
+Table of Contents
+1. System Overview
+1.1  Architecture Decisions - Locked
+2. Architecture Principles
+2.1  Modular Architecture
+2.2  API-Driven Integration
+2.3  Structured Command Execution
+2.4  Hybrid Intent Processing
+2.5  Separation of Concerns
+2.6  Security and Governance Enforcement
+2.7  Future Enterprise Expansion
+3. High-Level System Architecture
+3.1  User Interface Layer
+3.2  Chat Interaction Layer
+3.3  AI Processing Layer
+3.4  Command Execution Layer
+3.5  Integration Layer
+3.6  Data & Infrastructure Layer
+4. Chat Command Engine Architecture
+4.1  Command Processing Pipeline
+4.2  Command Types
+4.3  Structured Command Model
+4.4  Slot Filling Mechanism
+4.5  Command Registry Pattern
+4.6  Permission Enforcement
+4.7  Command Logging
+5. Conversation State Architecture
+5.1  Conversation State Types
+5.2  Session Storage
+5.3  Session Model
+5.4  Conversation Lifecycle
+5.5  Multi-Command Conversations
+5.6  Conversation Recovery
+6. LLM Integration Architecture
+6.1  Responsibilities of the LLM Layer
+6.2  Prompt Construction
+6.3  Hybrid Intent Detection
+6.4  Structured Output Enforcement
+6.5  Prompt Configuration System
+6.6  Failure Handling
+6.7  Multi-Provider Compatibility
+7. Security Architecture
+7.1  Authentication Enforcement
+7.2  Role-Based Access Control
+7.3  Attribute-Based Access Control
+7.4  Anonymity Enforcement
+7.5  Audit Logging
+7.6  Prompt Injection Protection
+8. Data Flow Architecture
+8.1  Query Command Flow
+8.2  Action Command Flow
+8.3  Conversation State Flow
+8.4  Logging and Monitoring Flow
+8.5  Chat Log Record Structure
+9. Deployment Architecture
+9.1  System Components
+9.2  Backend Module Integration
+9.3  Infrastructure Components
+9.4  Scalability Strategy
+10. Non-Functional Requirements
+10.1  Performance Targets
+10.2  System Scale
+10.3  Concurrency
+10.4  Reliability
+10.5  Success Metrics
+11. Evolution Roadmap
+11.1  Phase 1 - Command Assistant (Current)
+11.2  Phase 2 - Tool-Calling Assistant
+11.3  Phase 3 - Enterprise AI Agent Platform
+11.4  Evolution Summary
+
+PART 2 - LOW-LEVEL DESIGN (LLD)
+
+1. System Component Overview
+2. Chat API Design
+3. Command Engine Design
+4. Intent Parser Design
+5. LLM Service Design
+6. Conversation Session Design
+7. Database Schema Design
+8. Error Handling Strategy
+9. Security Enforcement
+10. Logging and Monitoring
+11. Deployment and Infrastructure Design
+12. Testing Strategy
+1. System Overview
+The AI Chat Assistant provides a natural language interface for interacting with the 360° Feedback System. Instead of navigating multiple dashboards and configuration screens, users can interact with the system through a conversational chat interface to retrieve information and execute authorized actions.
+The assistant translates user messages into structured system commands that interact with the backend services of the 360° Feedback platform. All actions executed by the assistant must pass through existing system APIs and follow the same permission validation, role-based access control, and governance rules defined by the platform.
+In Phase 1, the assistant supports operations only for the 360° Feedback module, including feedback cycles, reviewer tasks, templates, reports, and participation tracking. The assistant does not bypass business logic and does not directly access the database. Instead, it operates strictly as an intelligent interface layer that orchestrates commands through the backend service APIs.
+Although the initial scope is limited to the 360° Feedback module, the architecture of the chat assistant is designed to support future expansion into a broader enterprise AI assistant capable of interacting with additional HR and enterprise modules such as employee lifecycle management, payroll systems, and organizational analytics.
+This design ensures that the chat system can evolve from a module-specific assistant into a multi-domain enterprise automation interface without requiring architectural redesign.
+1.1 Architecture Decisions - Locked
+The following architectural decisions were evaluated and locked before system design started:
+Decision AreaDecisionStatusScope StrategyBuild Option A (360 Feedback only), Architect like Option B (Enterprise)LOCKEDArchitecture StyleModular Monolith - chat module inside Django backendLOCKEDIntent ProcessingHybrid - Rule-based + LLMLOCKEDCommand EngineCommand Registry Pattern (not hardcoded handlers)LOCKEDPrompt ManagementPrompt Configuration System (DB/Config, not hardcoded)LOCKEDSession ModelSingle active session per userLOCKEDChat LoggingSeparate chat_logs table (not mixed with audit_logs)LOCKEDLLM CachingNo caching in Phase 1 - simplicity firstLOCKEDAnalyticsDerived from chat_logs table (Phase 1)LOCKED2. Architecture Principles
+The AI Chat Assistant is designed using a set of architectural principles to ensure scalability, security, maintainability, and future extensibility.
+2.1 Modular Architecture
+The chat assistant will be implemented as a modular component inside the backend system rather than a separate microservice. This approach simplifies deployment and reduces infrastructure complexity while maintaining clear module boundaries.
+Each internal component of the chat assistant will be responsible for a specific responsibility such as intent detection, command execution, session management, and conversation logging.
+2.2 API-Driven Integration
+The chat assistant will not directly access the database or internal data models of the 360° Feedback system. All operations must be executed through existing backend APIs. This ensures that all business logic is enforced consistently, permission validation remains centralized, and system governance rules are not bypassed.
+2.3 Structured Command Execution
+User messages will be translated into structured commands before execution. Instead of allowing the AI model to directly trigger system actions, the assistant generates structured command objects that are validated and executed by the command engine. This design provides deterministic system behavior, strong security enforcement, and predictable execution workflows.
+2.4 Hybrid Intent Processing
+The chat assistant supports a hybrid intent detection approach combining rule-based command recognition with LLM-based natural language interpretation. This allows the system to process known commands efficiently, reduce LLM dependency for common requests, and support natural language queries for complex interactions.
+2.5 Separation of Concerns
+The chat assistant architecture separates the following responsibilities: natural language understanding, command interpretation, command execution, conversation state management, and system integration. This separation ensures maintainability and simplifies future expansion of the assistant to additional enterprise modules.
+2.6 Security and Governance Enforcement
+The assistant must operate under the same governance rules as the core platform. All commands must respect Role-Based Access Control (RBAC), Attribute-Based Access Control (ABAC), anonymity policies, and audit logging requirements. The assistant must never bypass backend authorization checks.
+2.7 Future Enterprise Expansion
+Although Phase 1 focuses on the 360° Feedback module, the architecture is designed to support expansion into a broader enterprise AI assistant platform capable of interacting with multiple organizational systems.
+3. High-Level System Architecture
+The AI Chat Assistant operates as an interaction layer on top of the existing 360° Feedback platform. The assistant enables users to perform system queries and execute authorized actions through a conversational interface while ensuring that all operations pass through existing backend APIs and governance controls.
+The system architecture consists of five primary layers plus supporting infrastructure components.
+
+3.1 User Interface Layer
+The user interface layer provides access to the chat assistant through the web application. Two chat interfaces are supported:
+Floating Chat Widget: Accessible from any page within the application. Enables quick commands and information retrieval without leaving the current context.
+Dedicated Chat Page: Supports longer conversations, displays conversation history, and provides detailed interaction workflows.
+This layer is implemented using the React frontend application.
+3.2 Chat Interaction Layer
+The Chat Interaction Layer is responsible for receiving user messages and managing chat communication between the frontend and backend. Key responsibilities include receiving user messages, sending system responses, streaming AI responses, managing chat sessions, and retrieving conversation history. This layer communicates with the backend using the Chat API endpoints defined in the PRD.
+3.3 AI Processing Layer
+The AI Processing Layer interprets natural language messages and converts them into structured system commands. Responsibilities include intent detection, parameter extraction, natural language understanding, and generating conversational responses. This layer uses an external LLM provider for natural language processing while ensuring that outputs follow the structured command schema defined by the system.
+3.4 Command Execution Layer
+The Command Execution Layer is responsible for validating and executing structured commands produced by the AI processing layer. Responsibilities include validating command structure, validating user permissions, requesting confirmation for action commands, and executing commands through backend APIs. The command engine ensures that AI-generated instructions cannot directly manipulate system data without validation.
+3.5 Integration Layer
+The Integration Layer connects the chat assistant with the core 360° Feedback system. All commands must interact with the platform through existing system APIs. Direct database access from the chat assistant is not permitted.
+System FeatureAPI EndpointMethodCreate feedback cycle/feedback/cyclesPOSTRetrieve feedback summary/feedback/summaryGETCheck pending reviews/reviews/pendingGETRetrieve cycle status/feedback/cycles/{id}GET3.6 Data & Infrastructure Layer
+The system relies on several infrastructure components to support the chat functionality.
+ComponentPurposePostgreSQLPrimary system database - stores feedback data and chat logsRedisSession storage for conversation state and temporary workflow contextLLM ProviderExternal AI provider for natural language processingDjango BackendCore application logic and chat assistant module4. Chat Command Engine Architecture
+The Command Engine is the core component responsible for translating user intentions into executable system actions. It acts as the control layer between natural language processing and the backend system APIs. The Command Engine ensures that AI-generated instructions cannot directly trigger system operations without validation and governance checks.
+4.1 Command Processing Pipeline
+Every user message follows a defined command processing pipeline that ensures validation at each stage before interacting with the core system.
+
+4.2 Command Types
+The chat system supports two categories of commands.
+4.2.1 Query Commands
+Query commands retrieve system information and do not modify system data. These commands execute immediately without requiring confirmation.
+CommandRoleDescriptionshow_my_feedbackEmployeeView personal feedback summaryshow_pending_reviewsManagerList pending review tasksshow_cycle_statusHR AdminView cycle progressshow_team_summaryManagerView team feedback overview4.2.2 Action Commands
+Action commands modify system data. Action commands require confirmation before execution.
+CommandRoleDescriptioncreate_cycleHR AdminCreate new feedback cyclecreate_templateHR AdminCreate feedback template4.3 Structured Command Model
+All commands generated by the system follow a structured JSON format. The command engine validates this structure before execution, including command existence, parameter completeness, parameter data types, and user permissions.
+{ "intent": "create_cycle", "parameters": { "department": "Engineering" } }
+4.4 Slot Filling Mechanism
+If a command is missing required parameters, the system uses a slot filling workflow to request additional information from the user. Once all required parameters are collected, the system proceeds to confirmation.
+Example Slot Filling Interaction
+User: Create a cycle for Engineering
+System: What should be the cycle name?
+User: Q3 Performance Review
+System: Which template should be used?
+4.5 Command Registry Pattern
+The command engine uses a Command Registry Pattern for internal implementation. Each command is implemented as a separate handler class registered in the command registry. This pattern enables clean architecture, easier testing, scalability for new commands, and support for future enterprise modules.
+CommandHandler Classcreate_cycleCreateCycleCommandshow_my_feedbackShowMyFeedbackCommandshow_pending_reviewsShowPendingReviewsCommandshow_cycle_statusShowCycleStatusCommandcreate_templateCreateTemplateCommand4.6 Permission Enforcement
+Before executing any command, the system validates user permissions. Permission validation includes RBAC role checks, ABAC attribute checks, and module-level authorization. If a user attempts an unauthorized command, the system will reject the request and display an appropriate message.
+4.7 Command Logging
+Every command execution must be logged for auditing and monitoring. Logged data includes user ID, command intent, parameters, execution result, and timestamp. These logs support auditing, debugging, and system analytics.
+5. Conversation State Architecture
+The AI Chat Assistant must maintain conversational context across multiple messages in order to support multi-step workflows such as slot filling and command confirmation. The Conversation State Architecture manages temporary interaction context during an active chat session while ensuring that long-term conversation history is stored for auditing and analytics.
+
+5.1 Conversation State Types
+5.1.1 Active Session State
+Active session state stores temporary information required to complete an ongoing command interaction, such as detected intent, extracted parameters, missing parameters, and pending command confirmation. This state is cleared when the command execution workflow completes.
+{ "intent": "create_cycle", "department": "Engineering", "cycle_name": "Q3 Review", "pending_field": "template_id" }
+5.1.2 Persistent Conversation History
+All chat conversations are stored in persistent storage for audit logging, debugging, analytics, and user conversation history. Stored data includes user messages, detected intents, system responses, executed commands, and timestamps.
+5.2 Session Storage
+Active conversation state will be stored in Redis as an in-memory session store. Benefits include fast access, support for multiple concurrent sessions, and horizontal scalability. Session expiration will occur after a defined inactivity timeout of 15-30 minutes.
+5.3 Session Model
+The system supports a single active session per user. This design avoids conversation state conflicts, simplifies Redis session management, enables easier debugging, and prevents parameter leakage between sessions. Multiple concurrent conversations are not supported in Phase 1.
+5.4 Conversation Lifecycle
+A conversation session follows this lifecycle: chat opened ? session created ? message received ? intent detected ? parameters collected (slot filling) ? command confirmation ? command execution ? session reset or conversation continues.
+5.5 Multi-Command Conversations
+A single conversation may contain multiple commands. The system must reset session state once a command workflow is completed to prevent parameter leakage between commands.
+5.6 Conversation Recovery
+If a user refreshes the application or reconnects to the chat system, the system should attempt to restore the active session state when possible. Conversation recovery is supported by storing session identifiers and retrieving the active state from the Redis session store.
+6. LLM Integration Architecture
+The AI Chat Assistant relies on an external Large Language Model (LLM) provider to interpret natural language input and generate structured commands. The LLM layer is responsible for transforming user messages into machine-readable command representations while maintaining conversational capabilities.
+The LLM is used only for language understanding and response generation. All system actions are executed through the command engine after validation.
+
+6.1 Responsibilities of the LLM Layer
+The LLM layer performs the following tasks: natural language intent detection, parameter extraction from user messages, conversational responses, and summarization tasks. The LLM never directly executes system operations. All outputs must conform to the structured command schema defined by the system.
+6.2 Prompt Construction
+Each LLM request will be constructed using a structured prompt that combines system instructions, conversation context, and the current user message. System instructions define the assistant's role and supported command structure. Conversation context contains relevant recent chat messages required for intent interpretation.
+6.3 Hybrid Intent Detection
+The system uses a hybrid intent detection strategy. Intent processing follows this order: first, the rule-based intent parser checks for known command patterns. If a command is recognized, it is executed directly without LLM involvement. Otherwise, the message is forwarded to the LLM service for natural language interpretation.
+This approach provides faster responses for common commands, reduced LLM usage cost, and improved reliability for known operations.
+6.4 Structured Output Enforcement
+The LLM must generate outputs that conform to the structured command schema. The system validates the structure before passing it to the command engine. If the output does not conform to the expected schema, the system will request clarification from the user.
+6.5 Prompt Configuration System
+Prompt templates are stored in a configuration layer (database or configuration service) rather than hardcoded in the codebase. This enables prompt tuning without redeployment, version control of prompts, and future A/B testing capabilities.
+FieldDescriptionidUnique identifier for the prompt templatenameTemplate name (e.g., intent_detection, response_generation)template_textThe prompt template with variable placeholdersversionVersion number for tracking prompt iterationscreated_atTimestamp of template creation6.6 Failure Handling
+The system must gracefully handle LLM failures including service unavailability, invalid structured output, and low confidence intent detection. Fallback behavior includes requesting user clarification, suggesting supported commands, and retrying with simplified prompts.
+6.7 Multi-Provider Compatibility
+The architecture introduces an LLM service abstraction layer that allows switching between LLM providers (OpenAI, Gemini, Anthropic, and others) without modifying the core chat system. The abstraction follows the pattern: Chat Module ? LLM Service Interface ? LLM Provider Adapter ? External LLM API.
+7. Security Architecture
+The AI Chat Assistant must operate under the same security and governance policies enforced by the 360° Feedback platform. The chat interface must never bypass existing authorization logic or access sensitive data without proper validation. All commands executed by the assistant must pass through backend APIs that enforce system security policies.
+
+7.1 Authentication Enforcement
+Users must be authenticated through the existing platform authentication system before accessing the chat assistant. Authentication is validated through user session tokens, secure authentication middleware, and backend session verification. The chat assistant will not implement a separate authentication mechanism.
+7.2 Role-Based Access Control
+All commands executed by the assistant must respect Role-Based Access Control (RBAC). Each command will be mapped to a list of authorized roles. The command engine validates permissions before executing any command.
+CommandAllowed Rolescreate_cycleHR Admincreate_templateHR Adminshow_my_feedbackEmployeeshow_pending_reviewsManagershow_cycle_statusHR Adminshow_team_summaryManager7.3 Attribute-Based Access Control
+In addition to RBAC, certain operations require attribute-level validation. For example, managers can only view reports for their team members, and employees can only access their own feedback data. These validations must be enforced by the backend APIs.
+7.4 Anonymity Enforcement
+The chat assistant must respect the anonymity rules defined by the 360° Feedback system. This includes masking reviewer identities, enforcing peer threshold rules (minimum 3 peer submissions before peer data is visible), and preventing identity inference. The assistant must never expose reviewer identity when anonymity policies prohibit it.
+7.5 Audit Logging
+All chat interactions and executed commands must be logged for auditing. Logged events include user messages, detected intents, command execution attempts, successful command execution, and rejected commands. These logs support governance, debugging, and compliance requirements.
+7.6 Prompt Injection Protection
+The system must protect against malicious prompts attempting to override system instructions. Protection mechanisms include strict structured command validation, command registry verification, and backend permission enforcement. Even if the LLM generates an unsafe command, the command engine must reject it.
+8. Data Flow Architecture
+The AI Chat Assistant processes user interactions through a structured data flow pipeline that ensures natural language interpretation, command validation, and secure execution through backend APIs. The system separates language interpretation, command validation, and system execution into distinct stages to maintain reliability and security.
+
+8.1 Query Command Flow
+Query commands retrieve system information and do not modify data. The flow is: User Message ? Intent Detection ? Command Engine ? Feedback API ? Data Retrieved ? Response Generated ? User. The response is generated using data returned from the backend APIs.
+8.2 Action Command Flow
+Action commands modify system data and follow a more controlled workflow: User Request ? Intent Detection ? Parameter Extraction ? Slot Filling (if required) ? Confirmation Request ? User Confirmation ? Command Execution ? Backend API ? System Response. The confirmation step prevents accidental execution of critical system actions.
+8.3 Conversation State Flow
+Conversation state management ensures that multi-step interactions maintain context. Session state is temporarily stored in Redis and cleared after command completion. This allows the system to track detected intents, extracted parameters, and pending slot fields across multiple message exchanges.
+8.4 Logging and Monitoring Flow
+Every interaction is logged to the chat_logs table for monitoring and governance. Analytics metrics including intent success rate, command success rate, LLM usage rate, and unsupported query rate are derived directly from the chat_logs table in Phase 1.
+MetricCalculation MethodIntent detection accuracysuccessful_intents / total_messagesCommand success ratesuccessful_commands / attempted_commandsUnsupported query rateunknown_intents / total_messagesAverage conversation turnsavg(messages_per_session)LLM usage ratellm_requests / total_requests8.5 Chat Log Record Structure
+Each chat interaction produces a log record with the following structure:
+{ "user_id": "hr_admin_102", "message": "Create cycle for Engineering", "intent": "create_cycle", "execution_status": "success", "timestamp": "2026-03-10T11:25:00" }
+9. Deployment Architecture
+The AI Chat Assistant will be deployed as a module within the existing backend infrastructure of the 360° Feedback System. The system follows a Modular Monolith architecture, ensuring simplified deployment while maintaining clean internal module boundaries. This architecture minimizes operational complexity while supporting future scalability.
+
+9.1 System Components
+ComponentPurposeReact FrontendChat interface (widget + dedicated page) and web applicationDjango BackendCore application logic with DRF REST APIsChat Assistant ModuleChat processing, intent detection, and command executionPostgreSQLPrimary system database and chat log storageRedisSession storage for conversation stateLLM ProviderExternal AI provider for natural language processingNginxReverse proxy and static file serving9.2 Backend Module Integration
+The chat assistant is implemented as an internal module inside the Django backend system, alongside existing modules.
+Backend Module Structure
+backend/  auth/  organization/  review_cycle_engine/  reviewer_workflow_engine/  feedback_processing/  dashboard_engine/  security_audit/  chat_assistant/  (NEW)
+Chat Assistant Module Components
+chat_assistant/  chat_controller  intent_parser  command_registry  command_handlers/  llm_service  session_manager  prompt_builder  chat_logger
+9.3 Infrastructure Components
+PostgreSQL
+Primary relational database storing feedback system data, conversation logs, command execution logs, and prompt template configurations.
+Redis
+Used for session state, conversation context storage, and temporary workflow state. Session expiration is configured for 15-30 minutes of inactivity.
+LLM Provider
+External AI provider responsible for natural language understanding. Accessed through the LLM Service Interface abstraction layer, supporting provider switching without code changes.
+9.4 Scalability Strategy
+The architecture supports future scaling through vertical scaling of backend servers, horizontal scaling of application containers, and distributed Redis session storage. If system usage grows significantly beyond 1,000 users, the chat module can be extracted as an independent service.
+10. Non-Functional Requirements
+10.1 Performance Targets
+OperationTarget TimeIntent detection< 1 secondQuery responses< 3 secondsCommand execution< 5 secondsStreaming start< 1 second10.2 System Scale
+The system will support up to 1,000 users within a single organization. The architecture will remain SaaS-ready for future multi-tenant expansion.
+10.3 Concurrency
+The system must support multiple simultaneous chat sessions, concurrent command execution, and stable performance during peak usage.
+10.4 Reliability
+The system must gracefully handle LLM downtime, backend API failures, and network interruptions. Users must receive clear fallback messages in all failure scenarios.
+10.5 Success Metrics
+MetricTargetIntent detection accuracy= 90%Command completion rate= 85%Average turns to complete command= 4Average response time< 3 secondsUser adoption rate= 50% of active users11. Evolution Roadmap
+The AI Chat Assistant architecture is designed to evolve gradually from a command-based assistant into a full enterprise AI automation platform. The system will expand in controlled phases to maintain security, predictability, and governance within enterprise environments.
+The evolution of the assistant is planned across three phases.
+11.1 Phase 1 - Command Assistant (Current)
+Phase 1 focuses on providing a conversational interface for executing structured commands within the 360° Feedback System. In this phase, the AI assistant performs the following responsibilities: interpreting natural language messages, converting messages into structured commands, validating commands through the command engine, executing backend APIs through command handlers, enforcing permission checks through RBAC and ABAC, and maintaining conversation state for multi-step interactions.
+The assistant executes one command per user request, ensuring predictable and secure system behavior.
+
+Phase 1 establishes the core infrastructure required for AI integration, including: Command Registry, Command Handlers, Session Management, Prompt Configuration System, Chat Logging, and Security Enforcement. This foundation ensures that all future AI capabilities operate within a controlled and auditable system environment.
+11.2 Phase 2 - Tool-Calling Assistant
+In Phase 2, the assistant will evolve to support tool selection capabilities. Instead of executing only predefined commands, the AI model will be able to select appropriate system tools from a controlled registry of available operations. Each tool represents a system capability exposed by the backend platform.
+Examples of system tools include:
+ToolDescriptioncreate_cycleCreate a new feedback cycleshow_pending_reviewsList pending review tasksshow_feedback_summaryRetrieve feedback summary for a usergenerate_cycle_reportGenerate a cycle performance reportThe AI will determine which tool to use based on the user request, while the command engine continues to enforce validation, security policies, and execution rules.
+
+Key capabilities introduced in Phase 2 include: AI-based tool selection, expanded natural language support, improved conversational interaction, and dynamic tool invocation within controlled boundaries. Despite increased AI flexibility, all system actions remain governed by the command engine.
+11.3 Phase 3 - Enterprise AI Agent Platform
+Phase 3 introduces multi-step AI agent workflows capable of performing complex operations that require multiple system actions. In this phase, the assistant will include an Agent Controller responsible for planning and executing sequences of tools to complete complex tasks.
+Example Agent Workflow
+User Request: "Generate performance report for my team"
+Agent Workflow:
+1. Step 1 ? Retrieve team members
+2. Step 2 ? Fetch feedback scores
+3. Step 3 ? Analyze performance trends
+4. Step 4 ? Generate summary report
+
+This phase transforms the assistant into a multi-module enterprise AI automation platform capable of interacting with multiple organizational systems. Future modules that may be integrated include:
+ModuleDescriptionPayroll SystemsSalary processing, tax calculations, compensation managementHR Lifecycle ManagementOnboarding, transfers, offboarding workflowsRecruitment PlatformsJob postings, candidate tracking, interview schedulingOrganizational AnalyticsWorkforce insights, attrition analysis, engagement metricsWorkflow AutomationApproval chains, document routing, task automationThe existing command engine, permission system, and audit logging infrastructure remain the foundation for all agent operations, ensuring that even advanced AI workflows continue to operate within secure enterprise governance policies.
+11.4 Evolution Summary
+The architecture evolves through three clearly defined stages. This staged evolution ensures that the system grows in capability while maintaining security, reliability, and governance within enterprise environments.
+
+PhaseCapabilityKey FeaturePhase 1Command AssistantStructured commands via rule + LLM hybridPhase 2Tool-Calling AssistantAI-based tool selection from controlled registryPhase 3Enterprise AI AgentMulti-step workflows with agent controller
+
+
+
+
+
+
+
+
+Part 2
+Low-Level Design (LLD)
+AI Chat Assistant for 360° Feedback System
+1. System Component Overview
+The AI Chat Assistant is implemented as a modular component within the Django backend system. The implementation follows a layered architecture that separates responsibilities across multiple layers to ensure maintainability, scalability, and clear separation of concerns.
+Each layer of the system handles a specific responsibility in the chat processing pipeline, from receiving user messages to executing backend system commands.
+
+1.1 Chat Assistant Module Structure
+The chat assistant module is implemented inside the backend system as a dedicated module alongside existing system modules such as auth, organization, review_cycle_engine, reviewer_workflow_engine, feedback_processing, dashboard_engine, and security_audit.
+1.2 Layered Architecture Structure
+The chat assistant module follows a layered internal structure with the following layers:
+LayerResponsibilityKey ComponentsControllersHandle incoming HTTP requests, validate payloads, return responseschat_controllerServicesOrchestrate chat workflow, coordinate componentschat_serviceCommandsExecute system actions via command handler classescreate_cycle_cmd, show_reviews_cmdRegistryMap command intents to handler classescommand_registryLLMManage LLM provider interactions and prompt constructionllm_service, prompt_builder, provider_adapterSessionsManage Redis session storage and conversation statesession_managerLoggingRecord chat interactions and command execution eventschat_logger2. Chat API Design
+The Chat Assistant communicates with the frontend application through a set of REST APIs implemented in the Django backend. These APIs handle message submission, command execution, conversation state management, and chat history retrieval.
+For Phase 1, the chat system uses REST-based request-response communication. Streaming responses using WebSockets or Server-Sent Events (SSE) will be introduced in Phase 2.
+
+2.1 Send Chat Message API
+Endpoint: POST /api/chat/message
+This endpoint handles all incoming user chat messages. The request includes the user message and session identifier. The response contains the detected intent, execution status, and relevant data or confirmation request.
+FieldTypeDescriptionmessagestringUser chat messagesession_idstringCurrent conversation session identifier2.2 Command Confirmation API
+Endpoint: POST /api/chat/confirm
+Action commands must be confirmed before execution to prevent accidental system changes. The client sends the session_id and a boolean confirmation flag. The system executes the pending command only if confirmation is true.
+2.3 Chat History API
+Endpoint: GET /api/chat/history
+This endpoint retrieves conversation history for the current user, returning all messages in the session including both user messages and assistant responses.
+2.4 Error Response Format
+All API errors follow a consistent response format containing status, error_code, and message fields.
+Error CodeDescriptionUNKNOWN_COMMANDChatbot could not detect intentPERMISSION_DENIEDUser lacks permission for this commandINVALID_PARAMETERSRequired command parameters missing or invalidSYSTEM_ERRORBackend system failure2.5 Future Enhancement - WebSocket Streaming (Phase 2)
+In Phase 2, the Chat Assistant will support real-time streaming responses using WebSocket connections. This will allow the assistant to send partial responses progressively instead of waiting for the full response to be generated.
+WebSocket Connection Lifecycle
+The WebSocket connection follows a defined lifecycle including connection establishment, authentication, active messaging, streaming, idle keep-alive, disconnection, and auto-reconnection.
+
+WebSocket Reconnection Strategy
+When a WebSocket connection drops due to network issues or timeouts, the client implements automatic reconnection with exponential backoff: initial retry after 1 second, doubling each attempt up to a maximum of 30 seconds, with a limit of 10 reconnection attempts. Heartbeat pings are sent every 30 seconds to detect stale connections.
+WebSocket Architecture
+The WebSocket connection will be established through ws://server/api/chat/ws. Once connected, the client can send chat messages and receive streaming responses. The WebSocket server will be implemented using Django Channels with ASGI (Daphne/Uvicorn) and Redis as the channel layer.
+WebSocket Message Format
+Client sends messages with type chat_message containing session_id and message. Server responds with stream_chunk messages containing partial content, followed by a stream_complete message when finished.
+ComponentPurposeDjango ChannelsWebSocket support for DjangoASGI Server (Daphne/Uvicorn)Async request handlingRedisChannel layer for message distributionNginxReverse proxy for WebSocket connections2.6 End-to-End Message Processing Sequence
+The following sequence diagram illustrates the complete message processing flow from client request to system response, showing how each component interacts during a typical chat interaction.
+
+3. Command Engine Design
+The Command Engine is responsible for executing structured system commands derived from user messages. It acts as the core execution layer between the AI interpretation components and the backend system APIs. The Command Engine ensures that all commands follow predefined system rules, pass permission validation, execute through controlled handlers, and generate consistent system responses.
+
+3.1 Command Engine Class
+The Command Engine is implemented as a core service with the following methods: validate_command() for verifying command structure, resolve_handler() for retrieving the appropriate handler from the registry, execute_command() for invoking the handler, and format_response() for constructing the system response.
+3.2 Command Registry
+The Command Registry maintains a mapping between command intents and command handler classes. It acts as the system's command lookup table.
+IntentHandler Classcreate_cycleCreateCycleCommandshow_pending_reviewsShowPendingReviewsCommandshow_feedback_summaryShowFeedbackSummaryCommandcreate_templateCreateTemplateCommand3.3 Base Command Class
+All command handlers extend a BaseCommand abstract class that defines a standard interface with execute(parameters, user_context) and validate_params() methods. Each command encapsulates the logic required to validate parameters, enforce permission checks, call backend APIs, and format the response.
+3.4 Command Confirmation Workflow
+Action commands that modify system data (such as create_cycle and create_template) require user confirmation before execution. The flow proceeds: User Request ? Intent Detection ? Parameter Extraction ? Confirmation Prompt ? User Confirms ? Command Execution. This prevents accidental system changes.
+3.5 Permission Enforcement
+Before executing a command, the system validates the user's permissions through RBAC role checks and ABAC attribute checks. If the user lacks permission, the system returns a PERMISSION_DENIED error response.
+3.6 Command Logging
+Every command execution is recorded in the chat_logs table. Logged information includes user ID, command intent, parameters, execution result, and timestamp. These logs support debugging, analytics, and auditing.
+4. Intent Parser Design
+The Intent Parser is responsible for interpreting user messages and converting them into structured commands. It follows a hybrid detection strategy combining rule-based detection and LLM interpretation.
+
+4.1 Message Preprocessing
+Before intent detection begins, the system performs basic preprocessing: trimming whitespace, normalizing text to lowercase, and removing unnecessary punctuation. This improves pattern matching accuracy during rule-based detection.
+4.2 Rule-Based Intent Detection
+The first step uses rule-based matching. The system checks whether the user message matches known command patterns such as "create cycle" mapping to create_cycle, or "pending reviews" mapping to show_pending_reviews. Rule-based detection resolves common commands without invoking the LLM.
+4.3 LLM-Based Intent Detection
+If rule-based detection fails, the system invokes the LLM service to interpret the message. The LLM analyzes the message and returns a structured command response with intent and parameters in JSON format. The system enforces strict validation to ensure the LLM output follows the expected schema.
+4.4 Parameter Extraction and Slot Filling
+The intent parser extracts command parameters from the user message. If required parameters are missing, the system triggers the slot-filling mechanism, asking the user for each missing parameter until all required fields are collected. Session data is stored in Redis until the command is complete.
+4.5 Intent Confidence Handling
+The system evaluates intent confidence before executing commands. High confidence results in immediate execution, medium confidence triggers a confirmation prompt asking the user to verify the detected intent, and low confidence asks the user to rephrase their request.
+5. LLM Service Design
+The LLM Service manages all interactions between the Chat Assistant and external Large Language Model providers. This layer acts as an abstraction layer that isolates AI provider integration from the rest of the system.
+5.1 LLM Provider Abstraction
+The system uses a provider abstraction layer with a base LLMProviderAdapter class. Each provider (OpenAI, Google Gemini, Anthropic Claude, local models) implements its own adapter. This design prevents vendor lock-in and allows switching providers without modifying the core system.
+5.2 Prompt Builder
+The Prompt Builder constructs structured prompts combining system instructions, conversation context, and the current user message. Prompt templates are loaded from the prompt_templates database table, enabling updates without code redeployment.
+Example Prompt Template
+SYSTEM: You are an AI assistant for the 360° Feedback System. Your role is to convert user messages into structured JSON commands.  Supported commands: - create_cycle (params: department, cycle_name, template) - show_pending_reviews (params: none) - show_feedback_summary (params: employee_id) - show_cycle_status (params: cycle_id)  Rules: 1. Always return valid JSON with "intent" and "parameters" fields 2. If intent is unclear, set intent to "unknown" 3. Extract all mentioned parameters from the message  CONTEXT: {{conversation_context}}  USER: {{user_message}}  Respond ONLY with JSON:
+5.3 Structured Output Enforcement
+The LLM is required to return responses in a structured JSON format with intent and parameters fields. The system validates the response including JSON structure, required fields, and intent names before passing it to the command engine. Invalid outputs trigger fallback handling.
+5.4 Failure Handling
+LLM failures (API timeout, provider downtime, malformed output) are handled through a fallback strategy: retry the request, then provide a fallback message asking the user to rephrase. All failures are logged for monitoring.
+5.5 Rate Limiting
+LLM requests are rate-limited to control operational costs. The following limits are enforced:
+LimitValueScopeMax requests per user per minute10Per authenticated userMax requests per user per hour100Per authenticated userMax token usage per session4,000 tokensPer chat sessionMax concurrent LLM requests5System-wideRequest timeout30 secondsPer LLM API call5.6 LLM Request Logging
+All LLM interactions are logged including user message, generated prompt, provider response, processing time, and error events. This helps monitor LLM performance and system behavior.
+6. Conversation Session Design
+The Conversation Session component manages the state of user conversations within the chat assistant. This component ensures that the system can maintain context during multi-step interactions such as slot filling and command confirmation. Session data is stored in Redis.
+
+6.1 Session Storage
+All active conversation sessions are stored in Redis using the key structure chat_session:{session_id}. Redis provides fast read/write performance, automatic expiration support, and scalable session handling.
+Redis Key Configuration
+Key PatternTTLPurposechat_session:{session_id}1800s (30 min)Active conversation state and slot-filling datachat_rate:{user_id}60sPer-user rate limiting counterchat_rate_hour:{user_id}3600sHourly rate limiting counterchat_lock:{user_id}10sConcurrent request prevention lock6.2 Session Data Structure
+Each chat session stores: session_id, user_id, active_intent, parameters (collected so far), missing_fields (parameters still needed), conversation_state, and created_at timestamp. This structure allows the assistant to continue incomplete workflows across multiple message exchanges.
+6.3 Conversation States
+StateDescriptionidleNo active commandintent_detectedIntent identified, checking parametersslot_fillingCollecting required parameters from userconfirmation_pendingWaiting for user confirmationexecutingCommand execution in progresscompletedCommand finished successfully6.4 Session Expiration
+Chat sessions automatically expire after 30 minutes of inactivity. When a session expires, conversation context is cleared and a new session is created on the next user message.
+6.5 Session Manager Component
+The Session Manager handles session lifecycle operations: get_session() to retrieve existing sessions, update_session() to modify session state, and delete_session() to remove expired sessions. Single active session per user is enforced to prevent conflicting conversation states.
+7. Database Schema Design
+The Chat Assistant stores operational data in PostgreSQL for conversation history, analytics, and AI prompt configuration. Only persistent information is stored in the database; temporary conversation state continues to be stored in Redis.
+
+7.1 Chat Logs Table
+The chat_logs table stores all user chat interactions and system responses, supporting conversation history retrieval, debugging, analytics, and command success monitoring.
+ColumnTypeDescriptionidUUIDUnique log identifier (PK)user_idUUIDUser initiating the request (FK ? users)session_idVARCHARChat session identifiermessageTEXTUser message contentintentVARCHARDetected command intentparametersJSONBExtracted command parametersexecution_statusVARCHARsuccess / error / confirmation_requiredresponse_messageTEXTAssistant responsecreated_atTIMESTAMPMessage timestamp7.2 Prompt Templates Table
+The prompt_templates table stores configurable prompt templates used by the LLM service, allowing prompt updates without modifying application code.
+ColumnTypeDescriptionidUUIDTemplate identifier (PK)nameVARCHARPrompt template nametemplate_textTEXTPrompt content with placeholdersversionINTEGERPrompt version numberis_activeBOOLEANActive template flagcreated_atTIMESTAMPCreation timestamp7.3 SQL DDL Statements
+Chat Logs Table DDL
+CREATE TABLE chat_logs (     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),     user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,     session_id VARCHAR(100) NOT NULL,     message TEXT NOT NULL,     intent VARCHAR(100),     parameters JSONB DEFAULT '{}',     execution_status VARCHAR(50) NOT NULL DEFAULT 'pending',     response_message TEXT,     created_at TIMESTAMP DEFAULT NOW() );  -- Immutable: no UPDATE or DELETE permitted on chat_logs -- Enforced via DB trigger (same pattern as audit_logs)
+Prompt Templates Table DDL
+CREATE TABLE prompt_templates (     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),     name VARCHAR(255) NOT NULL,     template_text TEXT NOT NULL,     version INTEGER NOT NULL DEFAULT 1,     is_active BOOLEAN DEFAULT TRUE,     created_at TIMESTAMP DEFAULT NOW(),     updated_at TIMESTAMP DEFAULT NOW(),     UNIQUE (name, version) );
+ENUM Definitions
+CREATE TYPE chat_execution_status AS ENUM     ('pending', 'success', 'error', 'confirmation_required',      'slot_filling', 'cancelled');  CREATE TYPE chat_sender_type AS ENUM     ('user', 'assistant', 'system');
+7.4 Indexing Strategy
+Indexes are added on user_id, session_id, intent, and created_at columns of the chat_logs table to optimize query performance for user history retrieval, session lookups, analytics queries, and time-based filtering.
+CREATE INDEX idx_chat_logs_user_id ON chat_logs(user_id); CREATE INDEX idx_chat_logs_session_id ON chat_logs(session_id); CREATE INDEX idx_chat_logs_intent ON chat_logs(intent); CREATE INDEX idx_chat_logs_created_at ON chat_logs(created_at DESC);
+7.4 Data Retention Policy
+Chat logs retention is set to 12 months. Older records may be archived to long-term storage, anonymized, or deleted according to compliance policies.
+8. Error Handling Strategy
+The Chat Assistant implements structured error handling mechanisms across the entire message processing pipeline to ensure failures are communicated clearly to the user while maintaining system stability.
+
+8.1 Unknown Command Handling
+If the system cannot determine the user's intent, it returns an UNKNOWN_COMMAND error with a helpful message suggesting supported commands such as "Show Pending Reviews", "Create Feedback Cycle", or "View Feedback Summary".
+8.2 Missing Parameter Handling
+When required parameters are missing, the system activates the slot-filling mechanism instead of returning an error. The assistant asks for each missing parameter until all required fields are collected.
+8.3 Permission and Validation Errors
+Permission errors (PERMISSION_DENIED) occur when a user attempts a command outside their role. Validation errors (INVALID_PARAMETER) occur when parameters don't match expected formats. Both are caught before command execution.
+8.4 Backend API and LLM Failures
+Backend API failures return a SYSTEM_ERROR with a user-friendly message. LLM failures follow a retry-then-fallback strategy: retry the request, then provide a fallback message asking the user to rephrase. All errors are logged with user_id, session_id, error_code, and timestamp.
+9. Security Enforcement
+The Chat Assistant enforces strict security controls to protect sensitive employee feedback data and ensure all operations follow organizational governance policies.
+
+9.1 Authentication
+All chat interactions must originate from authenticated users. The existing platform authentication middleware validates session tokens before chat processing begins. The chat assistant does not implement a separate authentication mechanism.
+9.2 RBAC Validation
+Commands are restricted based on user roles. Each command defines permitted roles (e.g., create_cycle requires HR Admin, show_pending_reviews requires Employee). The system validates the user's role before executing any command.
+9.3 ABAC Validation
+Attribute-based restrictions ensure users can only access data within their organizational context. Managers can only view feedback for their team members, and employees can only access their own feedback data.
+9.4 Prompt Injection Protection
+The system prevents prompt injection attacks through multiple safeguards: all commands must exist in the command registry, AI output must follow the structured command schema, and system permissions are validated independently of AI output. The LLM can never execute arbitrary actions.
+9.5 Sensitive Data Protection
+The assistant enforces anonymization rules for feedback responses, never reveals reviewer identities in anonymous cycles, and filters sensitive data from AI responses. Chat logs store minimal required information with sensitive identifiers masked.
+9.6 Audit Logging Integration
+All command executions are integrated with the system's audit logging framework. Audit records capture event type, user_id, and timestamp. Audit logs are stored separately from chat logs to maintain a clear governance trail.
+10. Logging and Monitoring
+The Chat Assistant includes a comprehensive logging and monitoring system for operational visibility, debugging capability, and performance tracking.
+10.1 Chat Interaction Logging
+All chat messages and system responses are recorded in the chat_logs table, capturing user_id, session_id, message, detected intent, parameters, execution status, response, and timestamp. This enables conversation history retrieval and operational analytics.
+10.2 Command Execution Monitoring
+Command execution events are monitored to track intent, execution result, execution time, and error occurrences. This allows detection of slow operations, failed commands, and unusual system behavior.
+10.3 LLM Interaction Monitoring
+LLM requests are monitored for prompt generation time, LLM response time, response success/failure, and token usage. This helps control operational costs and evaluate AI model performance.
+10.4 Analytics Metrics
+MetricDescriptionIntent Detection AccuracyPercentage of correctly detected intentsCommand Success RatePercentage of successfully executed commandsUnsupported Query RatePercentage of queries without valid commandsAverage Session LengthAverage number of messages per chat sessionLLM Usage RatePercentage of messages requiring LLM interpretation10.5 Alerting Strategy
+Alerting mechanisms notify system administrators when critical issues occur, such as repeated command failures, high LLM error rates, backend API downtime, or abnormal latency spikes. Alerts can be integrated with Prometheus, Grafana, or Datadog.
+11. Deployment and Infrastructure Design
+The Chat Assistant system is deployed as a module within the existing backend infrastructure following the modular monolith design. This reduces operational complexity while allowing future scalability.
+11.1 Infrastructure Components
+ComponentPurposeReact FrontendChat interface for usersNginxReverse proxy and request routingDjango BackendApplication logic and chat processingPostgreSQLPersistent database storageRedisSession storage and conversation stateLLM ProviderNatural language processingMonitoring ToolsLogging and performance monitoring11.2 Redis Infrastructure
+Redis manages temporary session state using the key structure chat_session:{session_id}. Redis is chosen for its high performance, low latency, and built-in expiration support for efficient management of concurrent chat sessions.
+11.3 Scaling Strategy
+The system supports vertical scaling (increasing CPU/memory) and horizontal scaling (multiple backend instances behind a load balancer). Redis and PostgreSQL remain shared infrastructure. If usage grows significantly, the chat module can be extracted as an independent microservice.
+11.4 Deployment Environments
+EnvironmentPurposeDevelopmentLocal testing by developersStagingPre-production validationProductionLive system used by end usersEnvironment configuration (database connections, Redis endpoints, LLM API keys, logging settings) is managed through environment variables for security.
+11.5 Infrastructure Monitoring
+System infrastructure is monitored for API response times, Redis performance, database query latency, and LLM response latency using tools such as Prometheus, Grafana, or Datadog.
+12. Testing Strategy
+The Chat Assistant implements a multi-layered testing strategy to ensure system reliability, security, and correctness across all components.
+
+12.1 Unit Tests
+Unit tests verify individual components in isolation. Each layer of the chat assistant has dedicated unit tests with a minimum coverage target of 80%.
+ComponentTest FocusMock DependenciesCommandEngineCommand validation, handler resolution, execution flowCommandRegistry, Backend APIsCommandRegistryIntent-to-handler mapping, unknown intent handlingNone (self-contained)IntentParserRule pattern matching, preprocessing, fallback to LLMLLM ServiceSessionManagerSession CRUD, expiration, state transitionsRedisPromptBuilderTemplate loading, variable substitution, context assemblyDatabaseChatLoggerLog record creation, field completenessDatabaseLLMServiceProvider adapter calls, response parsing, error handlingExternal LLM API12.2 Integration Tests
+Integration tests verify interactions between components and external systems. All API endpoints are tested with authenticated requests, Redis session operations are tested with actual Redis connections, and database operations are tested against a test PostgreSQL instance.
+12.3 End-to-End Tests
+End-to-end tests verify complete chat workflows including: full message-to-response flow for each supported command, multi-turn slot-filling conversations, command confirmation workflow for action commands, error handling for unknown commands and permission failures, and session expiration and recovery behavior.
+12.4 Security Tests
+Security tests verify that all RBAC rules are enforced (each command tested with authorized and unauthorized roles), ABAC attribute checks prevent cross-team data access, prompt injection attempts are blocked by the command registry validation, and anonymous feedback data never leaks reviewer identities through chat responses.
+
+
+End of Document
+HLD - AI Chat Assistant for 360° Feedback System	High-Level Design Document
+
+360° Feedback System	Page 
+

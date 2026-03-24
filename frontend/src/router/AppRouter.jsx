@@ -9,9 +9,10 @@ import UnauthorizedPage    from '../pages/auth/UnauthorizedPage';
 import ForgotPasswordPage  from '../pages/auth/ForgotPasswordPage';
 import AppLayout        from '../layouts/AppLayout';
 
-import UsersPage        from '../pages/admin/UsersPage';
-import OrgPage          from '../pages/admin/OrgPage';
-import AuditPage        from '../pages/admin/AuditPage';
+import UsersPage           from '../pages/admin/UsersPage';
+import OrgPage             from '../pages/admin/OrgPage';
+import AuditPage           from '../pages/admin/AuditPage';
+import ChatAnalyticsPage   from '../pages/admin/ChatAnalyticsPage';
 
 import CyclesPage       from '../pages/hr/CyclesPage';
 import CycleDetailPage  from '../pages/hr/CycleDetailPage';
@@ -34,6 +35,7 @@ import NominationsPage   from '../pages/employee/NominationsPage';
 import MyReportPage      from '../pages/employee/MyReportPage';
 
 import ProfilePage from '../pages/shared/ProfilePage';
+import ChatPage    from '../pages/shared/ChatPage';
 
 function RootRedirect() {
   const user = useAuthStore((s) => s.user);
@@ -63,6 +65,8 @@ export default function AppRouter() {
             element={<RequireRole roles={['SUPER_ADMIN','HR_ADMIN','MANAGER','EMPLOYEE']}><OrgPage /></RequireRole>} />
           <Route path="/admin/audit"
             element={<RequireRole roles={['SUPER_ADMIN']}><AuditPage /></RequireRole>} />
+          <Route path="/admin/chat-analytics"
+            element={<RequireRole roles={['SUPER_ADMIN','HR_ADMIN']}><ChatAnalyticsPage /></RequireRole>} />
 
           {/* HR Admin */}
           <Route path="/hr/cycles"
@@ -106,6 +110,7 @@ export default function AppRouter() {
           <Route path="/reports/:cycleId/:employeeId"
             element={<RequireRole roles={['SUPER_ADMIN','HR_ADMIN','MANAGER']}><EmployeeReportPage /></RequireRole>} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/chat"    element={<ChatPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

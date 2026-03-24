@@ -10,8 +10,11 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-gamyam_pass}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"       # 5433 on host to avoid clash with existing Postgres
+    # ⚠ NO host ports exposed intentionally.
+    # Postgres only needs to be reachable inside Docker (backend connects via db:5432).
+    # Exposing a host port (e.g. 5433:5432) causes conflicts when multiple projects run together.
+    # To inspect the DB directly from host, use:
+    #   docker exec -it gamyam360-db-1 psql -U gamyam_user -d gamyam_360_django
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gamyam_user} -d ${DB_NAME:-gamyam_360_django}"]
       interval: 10s
@@ -22,8 +25,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6380:6379"       # 6380 on host to avoid clash with existing Redis
+    # ⚠ NO host ports exposed intentionally.
+    # Redis only needs to be reachable inside Docker (backend connects via redis:6379).
+    # Exposing a host port (e.g. 6380:6379) causes conflicts when multiple projects run together.
+    # To inspect Redis directly from host, use:
+    #   docker exec -it gamyam360-redis-1 redis-cli
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

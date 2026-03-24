@@ -23,7 +23,9 @@ User = get_user_model()
 # ─── Users ────────────────────────────────────────────────────────────────────
 
 class UserListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    # GET is open to HR_ADMIN (needs to pick participants for cycles)
+    # POST (create user) remains SUPER_ADMIN only — enforced inside post()
+    permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def get(self, request):
         qs = User.objects.select_related('department', 'manager_relation__manager').all()
@@ -51,9 +53,18 @@ class UserListCreateView(APIView):
         return Response({'success': True, 'users': UserSerializer(qs, many=True).data})
 
     def post(self, request):
+        if request.user.role != 'SUPER_ADMIN':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Only Super Admin can create users.')
         serializer = CreateUserSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_CREATED',
+            entity_type='user', entity_id=user.id,
+            new_value={'email': user.email, 'role': user.role},
+        )
         return Response({'success': True, 'user': UserSerializer(user).data}, status=201)
 
 
@@ -79,6 +90,12 @@ class UserDetailView(APIView):
         serializer = UpdateUserSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_UPDATED',
+            entity_type='user', entity_id=user.id,
+            new_value={k: request.data[k] for k in request.data},
+        )
         return Response({'success': True, 'user': UserSerializer(updated).data})
 
     def delete(self, request, pk):
@@ -89,6 +106,12 @@ class UserDetailView(APIView):
             return Response({'success': False, 'error': 'Cannot deactivate your own account'}, status=400)
         user.status = 'INACTIVE'
         user.save(update_fields=['status'])
+        from apps.audit.models import AuditLog
+        AuditLog.log(
+            actor=request.user, action='USER_DEACTIVATED',
+            entity_type='user', entity_id=user.id,
+            new_value={'email': user.email, 'status': 'INACTIVE'},
+        )
         return Response({'success': True, 'message': 'User deactivated'})
 
 

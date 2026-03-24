@@ -91,7 +91,7 @@ class CycleDetailView(APIView):
 class CycleParticipantsView(APIView):
 
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request.method in ('POST', 'DELETE'):
             return [IsAuthenticated(), IsHRAdmin()]
         return [IsAuthenticated()]
 
@@ -106,6 +106,13 @@ class CycleParticipantsView(APIView):
             pk, serializer.validated_data['participant_ids'], request.user
         )
         return Response({'success': True, 'participants': CycleParticipantSerializer(participants, many=True).data})
+
+    def delete(self, request, pk):
+        user_id = request.data.get('user_id')
+        if not user_id:
+            return Response({'success': False, 'message': 'user_id is required'}, status=400)
+        services.remove_participant(pk, user_id, request.user)
+        return Response({'success': True, 'message': 'Participant removed'})
 
 
 # ─── State Transitions ────────────────────────────────────────────────────────

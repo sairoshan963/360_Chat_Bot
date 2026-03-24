@@ -1,0 +1,561 @@
+﻿360° Feedback & Performance Intelligence System
+Business Requirements Document (BRD / PRD)
+
+1. PRODUCT OVERVIEW
+1.1 Purpose
+The 360° Feedback & Performance Intelligence System is a secure, configurable enterprise platform designed to manage structured, multi-rater employee evaluation cycles.
+The system ensures:
+• Controlled feedback collection
+• Psychological safety through configurable anonymity
+• Role-based visibility enforcement
+• Governance-grade audit tracking
+• Scalable architecture for future performance modules
+
+The system replaces spreadsheet-based and ad-hoc review processes with a structured, automated workflow.
+1.2 Core Objectives
+The system must:
+• Enable structured feedback cycles with defined lifecycle states.
+• Automate reviewer assignment based on organizational hierarchy.
+• Support configurable peer nomination with governance safeguards.
+• Enforce configurable anonymity states per reviewer type.
+• Implement threshold-based anonymity protection.
+• Provide role-based report visibility.
+• Maintain immutable audit logging.
+• Deliver organization-level and team-level analytics.
+• Support modular expansion for future performance modules (AI summaries, OKRs, engagement surveys).
+1.3 Scope (Phase 1)
+Included in Phase 1:
+• Feedback cycle engine
+• Peer nomination workflow
+• Role-based access control
+• Anonymity enforcement
+• Peer threshold rule
+• Report generation
+• Audit logging
+• Dashboard analytics
+• Org hierarchy integration
+
+Out of Scope (Future Phases):
+• Continuous feedback outside cycles
+• AI-generated summaries
+• Goal tracking (OKRs)
+• Attrition risk analytics
+• Engagement pulse surveys
+
+2. USER ROLES & ACCESS STRUCTURE
+The system enforces strict Role-Based Access Control (RBAC).
+All permissions must be enforced at:
+• API Layer
+• Service Layer
+• Data Access Layer
+
+UI restrictions alone are not sufficient.
+2.1 Role Definitions
+2.1.1 Super Admin
+Purpose: System Owner & Governance Authority.
+Permissions:
+• Create / edit / deactivate users
+• Assign roles
+• Override cycle states (with audit log)
+• View all feedback data
+• Access identity mapping (even in Anonymous mode)
+• Export system-wide reports
+• Access full audit logs
+• Modify system-level configurations
+Restrictions:
+• All identity access must be audit logged.
+• Override actions must be logged with timestamp and actor.
+Access Level: FULL
+2.1.2 HR Admin
+Purpose: Cycle Operator & Organizational Analytics Owner.
+Permissions:
+• Create and configure feedback cycles
+• Define participants
+• Enable/disable peer review
+• Configure peer count range
+• Configure anonymity states
+• Monitor nomination and submission progress
+• View aggregated analytics
+• Manually release results (if configured)
+Restrictions:
+• Cannot access anonymous reviewer identity mapping
+• Cannot modify cycle after Finalization stage
+Access Level: OPERATIONAL
+2.1.3 Manager
+Purpose: Team Evaluator & Insight Consumer.
+Permissions:
+• Submit manager reviews for direct reports
+• Approve/override peer nominations (if enabled)
+• View individual team member reports
+• View team-level comparison dashboard
+• Access visibility as per anonymity configuration
+Restrictions:
+• Cannot see anonymous peer identities
+• Cannot access reports of employees outside their scope
+• Cannot modify cycle configuration
+Access Level: TEAM
+2.1.4 Employee
+Purpose: Feedback Participant.
+Permissions:
+• Submit self review
+• Submit assigned peer / upward reviews
+• Nominate peers (if enabled)
+• View own final report after release
+Restrictions:
+• Cannot see reviewer identities (unless Transparent mode)
+• Cannot view other employees' reports
+• Cannot modify assigned tasks
+Access Level: INDIVIDUAL
+2.2 Role Enforcement Rules
+• Permissions must be validated at backend before returning data.
+• Identity masking must be enforced in service layer.
+• Role escalation attempts must be logged.
+• Access violations must return secure error responses.
+2.3 Role Hierarchy Clarification
+System Role Hierarchy (Access-based):
+Super Admin → HR Admin → Manager → Employee
+
+Organizational Hierarchy (Reporting-based):
+Manager → Direct Reports
+
+These two hierarchies are independent.
+
+3. FEEDBACK CYCLE LIFECYCLE
+Each feedback cycle must move through strictly defined states. No state skipping is allowed.
+
+STAGE 1 - DRAFTActor: HR AdminActions Allowed:
+• Create cycle
+• Define cycle name & description
+• Select participants (department / manager / custom selection)
+• Enable reviewer types (Self / Manager / Peer / Direct Reports)
+• Configure peer count range (if peer enabled)
+• Configure anonymity states
+• Select review template
+• Set nomination deadline (if applicable)
+• Set feedback deadline
+• Save as draftSystem Requirements:
+• Validate mandatory fields
+• Validate peer count logic (min ≤ max)
+• Prevent activation if required fields missingConstraints:
+• No feedback tasks created in Draft
+• No nomination visible
+• All settings fully editable
+STAGE 2 - NOMINATION OPEN (Conditional)Actor: Employee (Reviewee) / Manager (Optional Override Mode)Actions Allowed:
+• Employee: Nominate peers within configured min/max range
+• Employee: Edit nomination until deadline
+• Manager: View team nominations
+• Manager: Modify nominations (if approval mode allows)System Requirements:
+• Enforce minimum & maximum peer count
+• Prevent self nomination
+• Prevent duplicate selection
+• Restrict peer selection to cycle participant scope
+• Track nomination completion statusConstraints:
+• Feedback submission NOT allowed in this stage
+• Cycle configuration locked (except nominations)
+• If nomination incomplete → cannot move to FinalizedTrigger: Nomination deadline reached → Move to Finalization
+STAGE 3 - FINALIZED / LOCKEDActor: HR AdminActions Allowed:
+• Click "Finalize & Activate"System Requirements:
+• Snapshot organizational hierarchy
+• Freeze participant list
+• Freeze reviewer list
+• Freeze anonymity settings
+• Freeze review template
+• Generate feedback task recordsConstraints:
+• No reviewer addition/removal allowed
+• No anonymity changes allowed
+• No participant modification allowed
+• Cycle status becomes → ACTIVE
+STAGE 4 - ACTIVE (Feedback Submission Phase)Actor: Employee / Manager / Assigned PeersActions Allowed:
+• View assigned review tasks
+• Open feedback form
+• Save draft (optional feature)
+• Submit reviewSystem Requirements:
+• Record timestamp
+• Apply anonymity flag
+• Store reviewer identity separately
+• Prevent editing after submission (unless configured)Constraints:
+• Reviewer list cannot change
+• Template cannot change
+STAGE 5 - CLOSEDActor: System (Automatic - triggered when feedback deadline passes)System Requirements:
+• Lock all feedback tasks
+• Prevent further submissions
+• Begin processing pipeline
+• Apply peer threshold rule
+• Aggregate ratings
+• Mask identities
+STAGE 6 - RESULTS RELEASEDActor: HR Admin (Manual Release Recommended)Actions Allowed:
+• Release reports to participantsSystem Requirements:
+• Employee can view own report
+• Manager can view team reports
+• Dashboards activated
+STAGE 7 - ARCHIVEDActor: System StateActions Allowed:
+• Read-only
+• Accessible for analytics & audit
+• Cannot be modified or deleted
+🔒 Governance Rules• No state skipping allowed.
+• Reopening a closed cycle requires Super Admin action + audit log.
+• All state transitions must be logged.
+• Identity access events must be logged.
+• Peer threshold enforcement is system-controlled and non-overridable.
+4. REVIEWER ASSIGNMENT & PEER NOMINATION ENGINE
+Reviewer assignment must be deterministic, snapshot-based, and immutable after Finalization. The system must not dynamically calculate reviewers during the Active stage.
+4.1 Reviewer Types
+The system supports the following reviewer types:
+• Self
+• Direct Manager
+• Peer
+• Direct Reports (Optional)
+
+Each reviewer type can be enabled or disabled per cycle.
+4.2 Participant Scope Definition
+Before reviewer assignment, HR must define:
+• Participant set (Reviewees)
+• Scope source: Department / Manager Team / Custom Selection / Project Group
+
+Reviewer assignment logic applies only within the participant scope. Employees outside scope must not see the cycle, nominate peers, or be assigned reviews.
+4.3 Automatic Reviewer Assignment Logic
+Reviewer assignment must occur only at STAGE 3 - Finalized / Locked. System must generate reviewer mappings using a snapshot of org hierarchy.
+4.3.1 Self Review Logic
+For each reviewee: Assign reviewer = reviewee. Mandatory if Self enabled.
+4.3.2 Manager Review Logic
+For each reviewee: Assign reviewer = manager_id from org hierarchy snapshot.
+Constraint: If manager not in participant scope → still assign (unless explicitly excluded by HR).
+4.3.3 Direct Report Review Logic (Optional)
+For each reviewee: Assign reviewers = employees where manager_id = reviewee_id within scope.
+4.4 Peer Nomination Engine
+Triggered only if Peer Review = Enabled.
+4.4.1 Nomination Phase Requirements
+Employee must:
+• Select peers within configured min/max range.
+• Select only from participant scope.
+• Cannot select: Self, Direct Manager (unless policy allows), Duplicate entries
+
+System must:
+• Track nomination status.
+• Prevent Finalization if minimum peer count not met.
+4.4.2 Approval Mode Configuration
+Cycle must support three modes:
+• Auto-Approve (Default Recommended)
+• Manager Override (Optional Adjustment)
+• Mandatory Manager Approval (For promotion cycles)
+
+Mode must be configured before activation.
+4.4.3 Peer Reviewer Mapping
+After nomination window closes, system must create reviewer records with fields: cycle_id, reviewee_id, reviewer_id, reviewer_type (Peer), anonymity_state. Reviewer mapping must be frozen after Finalization.
+4.5 Reviewer Mapping Storage Requirements
+System must create a reviewer_task table containing:
+• reviewee_id
+• reviewer_id
+• reviewer_type
+• task_status
+• anonymity_state
+• submission_timestamp
+
+This table must not be modified after Finalization.
+4.6 Snapshot Enforcement Rule
+When cycle moves to Finalized, system must capture org hierarchy snapshot and prevent future org changes from affecting reviewer assignments.
+Example: If manager changes mid-cycle → reviewer does not change.
+4.7 Edge Case Handling
+• If reviewer leaves organization during Active stage: Task marked inactive. No reassignment unless HR manually triggers.
+• If reviewee leaves: Report generation must still preserve submitted data.
+• If nomination incomplete: Cycle cannot move to Finalized.
+
+🔒 Governance Rules• Reviewer list cannot change after Finalization.
+• All reviewer mapping events must be audit logged.
+• Peer count enforcement must be backend validated.
+5. ANONYMITY & THRESHOLD ENFORCEMENT
+Anonymity must be configurable per reviewer type per cycle and enforced at service and data layers. Anonymity configuration becomes immutable once cycle enters Finalized state.
+5.1 Supported Anonymity States
+
+StateEmployeeManagerSuper AdminUse CaseAnonymous❌ Hidden❌ Hidden✔ (Audit Logged)Peer feedback, sensitive evaluationsSemi-Anonymous❌ Hidden✔ Visible✔ VisibleDirect report feedback, manager oversightTransparent✔ Visible✔ Visible✔ VisibleSelf review, manager review, structured cycles
+5.2 Identity Storage Requirements
+System must store Feedback Content (ratings + comments) and Reviewer Identity Mapping as logically separated records.
+• Identity must not be returned in API responses unless anonymity policy allows it.
+• Masking must occur in service layer.
+• Frontend must not receive hidden identity fields.
+5.3 Peer Threshold Rule (Mandatory Enforcement)
+Minimum peer submission count must be ≥ 3.
+If peer submissions < 3, system must:
+• Hide peer feedback section in employee report
+• Exclude peer ratings from employee-visible summary
+• Prevent identity inference
+
+This rule is system-enforced and cannot be overridden during Active or Closed stages.
+5.4 Anonymity Enforcement Logic
+When generating report, system must evaluate: reviewer role, anonymity state, and submission count (for peers). Only then determine whether to include identity, display peer section, or aggregate ratings.
+5.5 Audit Logging Requirements
+System must log:
+• Every identity access event
+• Super Admin identity reveal actions
+• Attempted unauthorized identity access
+
+Audit logs must be immutable.
+5.6 Governance Rules
+• Anonymity configuration cannot change after Finalization.
+• Identity mapping must never be exposed through direct queries.
+• Peer threshold enforcement is non-configurable during active cycle.
+• Any anonymity compromise is considered critical system failure.
+
+6. FEEDBACK TASK LIFECYCLE & PROCESSING PIPELINE
+Each reviewer-reviewee pair creates a Feedback Task. Each task must follow a defined state flow.
+6.1 Feedback Task Lifecycle
+6.1.1 CREATED
+Triggered when cycle enters Finalized stage. System generates reviewer_task records for all reviewer-reviewee mappings. Status: CREATED. Task not yet visible to reviewer.
+6.1.2 PENDING
+Triggered when cycle enters Active stage. Task becomes visible to reviewer. Reviewer can open form and start review.
+6.1.3 IN PROGRESS (Optional)
+If reviewer opens form and saves draft, status becomes IN PROGRESS. System must save partial responses.
+6.1.4 SUBMITTED
+Triggered when reviewer clicks Submit.
+System must:
+• Validate required fields
+• Store ratings
+• Store comments
+• Record submission timestamp
+• Store anonymity state
+• Separate identity mapping
+
+After submission, editing policy: either lock immediately, or allow edit until deadline (configurable).
+6.1.5 LOCKED
+Triggered when cycle status becomes CLOSED. System must prevent edits, freeze task permanently, and mark as LOCKED.
+6.2 Post-Submission Processing Pipeline
+Triggered when cycle enters CLOSED state.
+
+Step 1 - Secure StorageAll raw feedback stored encrypted.Step 2 - Apply Anonymity RulesMask identity based on reviewer type, anonymity state, and viewer role.Step 3 - Apply Peer Threshold RuleIf peer submissions < threshold: hide peer section, exclude peer rating from employee-visible report.Step 4 - Aggregate RatingsFor each competency: calculate peer average, manager rating, self rating, and compute overall score (if weighting applied). Aggregation must be deterministic.Step 5 - Group Text ResponsesCombine peer comments, remove identity indicators, categorize as Strength / Improvement (basic grouping in Phase 1).Step 6 - Generate Structured ReportGenerate role-specific report versions: Employee View, Manager View, HR View, Super Admin View. Each version must respect RBAC + anonymity logic.
+6.3 Result Release Logic
+Results must not be visible until cycle state = RESULTS RELEASED. Recommended: Manual release by HR Admin.
+6.4 Immutability Requirements
+After cycle is CLOSED:
+• No edits allowed
+• No score recalculation
+• No identity changes
+• No deletion
+• All report generation must be reproducible
+6.5 Governance Rules
+• Processing must be deterministic and auditable.
+• Aggregation logic must be consistent across roles.
+• All submission timestamps must be preserved.
+• All processing events must be audit logged.
+
+7. DASHBOARD & ANALYTICS ENGINE
+Dashboards must provide aggregated, role-based insights while respecting anonymity and RBAC rules. All dashboard data must be derived from processed, locked cycle data.
+7.1 Role-Based Dashboard Views
+7.1.1 Employee Dashboard
+Visible Data:
+• Own feedback report
+• Competency averages
+• Strength themes
+• Improvement themes
+• Submission status during active phase
+Not Visible:
+• Reviewer identities (unless Transparent)
+• Other employees' data
+• Raw peer responses
+7.1.2 Manager Dashboard
+Visible Data:
+• Individual team member reports
+• Team-level average scores
+• Competency comparison across team
+• Completion status of team reviews
+• Peer threshold compliance status
+Not Visible:
+• Anonymous peer identity (if Anonymous mode)
+• Employees outside reporting scope
+7.1.3 HR Admin Dashboard
+Visible Data:
+• Organization-wide participation rate
+• Department-level score distributions
+• Competency heatmaps
+• Completion tracking
+• Peer nomination completion status
+• Risk indicators
+• Average review cycle time
+• SLA adherence metrics
+Not Visible:
+• Anonymous reviewer identity mapping
+7.1.4 Super Admin Dashboard
+Visible Data:
+• All organizational insights
+• Identity mapping (audit logged)
+• Exportable cross-cycle comparisons
+• System health metrics
+7.2 Dashboard Metrics
+The system must calculate:
+7.2.1 Completion Metrics
+• % of reviews submitted
+• Submission rate by reviewer type
+• Submission rate by department
+• Overdue task count
+7.2.2 Performance Metrics
+• Average score per competency
+• Manager vs Peer vs Self comparison
+• Score distribution curve
+• Outlier detection (extreme ratings)
+7.2.3 Participation Metrics
+• Peer nomination completion %
+• Manager review completion %
+• Self-review completion %
+7.2.4 Risk Indicators
+System must flag:
+• Low score clusters (< threshold defined by org)
+• Large self vs peer score gap
+• Large peer variance
+• Repeated low-performing competency
+
+Risk indicators must not reveal identity.
+7.3 Filtering Capabilities
+HR & Super Admin must be able to filter dashboards by:
+• Department
+• Manager
+• Role Level
+• Review Cycle
+• Competency
+• Time Period
+
+Filtering must respect RBAC scope.
+7.4 Export Controls
+Allowed Roles: HR Admin, Super Admin.
+Exports must:
+• Be audit logged
+• Record export scope
+• Record timestamp
+• Record actor
+7.5 Data Consistency Rules
+• Dashboard data must only use locked cycle data.
+• Real-time dashboard updates allowed during Active stage (submission tracking only).
+• Performance metrics must not update after cycle is closed and processed.
+
+8. SECURITY, AUDIT & DATA GOVERNANCE
+All security rules must be enforced at backend (API + Service + Data layers). UI-level restrictions alone are insufficient.
+8.1 Role-Based Access Control (RBAC) Enforcement
+System must enforce:
+• Permission validation at API layer
+• Data-level scoping based on role
+• Secure error responses for unauthorized access
+• No direct database access exposure
+
+All access must be verified against role and cycle configuration.
+8.2 Audit Logging Requirements
+The system must log every critical event. Audit logs must be immutable, timestamped, non-editable, non-deletable, and accessible only to Super Admin.
+8.2.1 Events That Must Be Logged
+• User login and logout events
+• Role changes and permission modifications
+• Cycle creation and configuration changes
+• Cycle state transitions
+• Reviewer assignment generation
+• Feedback submission timestamps
+• Report view events (who viewed whose report)
+• Data export events (file type, scope, timestamp)
+• Identity access events (especially Super Admin reveals)
+• Manual override actions (reassignment, reopening cycle)
+8.3 Identity Protection Enforcement
+System must:
+• Separate feedback content from identity mapping
+• Never expose reviewer identity unless anonymity allows
+• Log every identity reveal action
+• Prevent identity exposure via API manipulation
+
+Unauthorized identity access attempts must be logged.
+8.4 Data Encryption & Protection
+System must ensure:
+• Data at rest is encrypted
+• HTTPS enforced for all communication
+• Secure authentication integration
+• Role validation per session
+• Protection against direct object reference vulnerabilities
+8.5 Data Retention & Archival Policy
+• Closed cycles cannot be deleted - only archived.
+• Archived cycles remain accessible for audit and analytics.
+• Data retention duration must follow organizational compliance policy.
+• Restoration process must be controlled and logged.
+• No hard deletion allowed without Super Admin authority + audit trail.
+8.6 Disaster Recovery & Backup
+System must support:
+• Automated periodic backups
+• Controlled restoration process
+• High availability architecture
+• Defined recovery procedures
+8.7 Governance Rules
+• Any anonymity breach is a critical system failure.
+• No mid-cycle configuration changes allowed after Finalization.
+• No data export without audit logging.
+• No cycle reopening without Super Admin override.
+• All system-level overrides must be logged with actor + timestamp.
+
+9. SYSTEM ARCHITECTURE OVERVIEW (6-Layer Model)
+The system must follow a modular, layered architecture to ensure scalability, security, and separation of concerns. Each layer must operate independently and enforce its own integrity rules.
+
+#LayerResponsibility1Employee & Org Data LayerStore employee records, org hierarchy, snapshot data during finalization, peer scope filtering.2Review Cycle EngineManage lifecycle states, validate configuration, control transitions, trigger reviewer assignment.3Reviewer Workflow EngineExecute reviewer mapping, enforce nomination rules, validate peer counts, snapshot logic.4Feedback Storage & Processing EngineStore raw feedback, separate identity, apply anonymity masking, aggregate ratings, generate reports.5Visibility & Dashboard EngineCompute aggregated dashboards, enforce RBAC filtering, generate risk indicators.6Security & Audit LayerLog all critical actions, validate role permissions, enforce export controls, immutable audit trail.
+9.1 Layer 1 - Employee & Organizational Data Layer
+Purpose: Store employee records, org hierarchy (manager_id relationships), department and role-level data.
+Responsibilities:
+• Maintain reporting structure
+• Provide snapshot data during cycle finalization
+• Validate hierarchy integrity (no circular reporting)
+• Provide peer selection scope filtering
+Constraints:
+• This layer must not contain cycle-specific logic.
+• Cycle engine must only read from this layer during Finalization.
+9.2 Layer 2 - Review Cycle Engine
+Purpose: Manage lifecycle of feedback cycles.
+Responsibilities:
+• Handle cycle state transitions
+• Validate configuration completeness
+• Control Draft → Nomination → Finalized → Active → Closed → Archived
+• Prevent illegal state transitions
+• Trigger reviewer assignment at Finalization
+Constraints:
+• No feedback processing logic in this layer.
+• No direct dashboard computation here.
+9.3 Layer 3 - Reviewer Workflow Engine
+Purpose: Manage reviewer assignment and nomination logic.
+Responsibilities:
+• Execute automatic reviewer mapping
+• Enforce peer nomination rules
+• Validate peer count constraints
+• Store reviewer_task records
+• Enforce snapshot logic
+Constraints:
+• Reviewer mapping cannot change after Finalization.
+• No identity exposure at this layer.
+9.4 Layer 4 - Feedback Storage & Processing Engine
+Purpose: Handle feedback submission and report generation.
+Responsibilities:
+• Store raw feedback securely
+• Separate identity mapping
+• Apply anonymity masking
+• Enforce peer threshold rule
+• Aggregate ratings
+• Generate role-specific reports
+Constraints:
+• Must be deterministic
+• Must not modify submitted data after closure
+9.5 Layer 5 - Visibility & Dashboard Engine
+Purpose: Provide analytics and filtered insights.
+Responsibilities:
+• Compute aggregated dashboards
+• Enforce RBAC-based filtering
+• Support filtering dimensions (Department, Manager, Cycle, Competency)
+• Generate risk indicators
+Constraints:
+• Must not bypass anonymity logic
+• Must only read processed, locked data
+9.6 Layer 6 - Security & Audit Layer
+Purpose: Enforce system-level governance.
+Responsibilities:
+• Log all critical actions
+• Track identity access events
+• Validate role permissions
+• Enforce export controls
+• Maintain immutable audit trail
+Constraints:
+• Must sit above all other layers
+• Must not allow audit log modification
+9.7 Cross-Layer Governance Rules
+• No layer may directly manipulate another layer's internal data.
+• Identity masking must be enforced before data leaves processing layer.
+• Snapshot logic must be executed only once per cycle.
+• All override actions must pass through Security layer.
+• Architecture must support future modules without refactoring core layers.
+
+360° Feedback & Performance Intelligence System  •  Business Requirements Document

@@ -90,6 +90,9 @@ def create_template(name, description, sections, actor):
     if not name:
         raise ValidationError('Template name is required')
 
+    if Template.objects.filter(name__iexact=name).exists():
+        raise ValidationError('Template with this name already exists')
+
     with transaction.atomic():
         template = Template.objects.create(
             name=name,
@@ -184,6 +187,10 @@ def create_cycle(data, actor):
     if not template_id:    raise ValidationError('template_id is required')
     if not review_deadline: raise ValidationError('review_deadline is required')
 
+    from apps.review_cycles.models import ReviewCycle as _RC
+    if _RC.objects.filter(name__iexact=name).exists():
+        raise ValidationError('Cycle with this name already exists')
+
     try:
         template = Template.objects.get(id=template_id, is_active=True)
     except Template.DoesNotExist:
@@ -264,6 +271,17 @@ def add_participants(cycle_id, user_ids, actor):
     ]
     CycleParticipant.objects.bulk_create(participants, ignore_conflicts=True)
     return CycleParticipant.objects.filter(cycle=cycle).select_related('user')
+
+
+def remove_participant(cycle_id, user_id, actor):
+    cycle = _get_cycle_or_404(cycle_id)
+    if cycle.state != 'DRAFT':
+        raise ValidationError('Participants can only be removed in DRAFT state')
+    deleted, _ = CycleParticipant.objects.filter(cycle=cycle, user_id=user_id).delete()
+    if not deleted:
+        raise NotFound('Participant not found in this cycle')
+    AuditLog.log(actor=actor, action='REMOVE_PARTICIPANT', entity_type='review_cycle',
+                 entity_id=cycle_id, new_value={'cycle': cycle.name, 'user_id': str(user_id)})
 
 
 def get_participants(cycle_id):
@@ -379,7 +397,7 @@ def close_cycle(cycle_id, actor):
 
         from apps.reviewer_workflow.models import ReviewerTask
         ReviewerTask.objects.filter(
-            cycle=cycle, status__in=['PENDING', 'IN_PROGRESS']
+            cycle=cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
         ).update(status='LOCKED')
 
         cycle.state = 'CLOSED'
@@ -451,7 +469,7 @@ def override_cycle(cycle_id, target_state, reason, actor):
         if target_state in ['CLOSED', 'RESULTS_RELEASED', 'ARCHIVED']:
             from apps.reviewer_workflow.models import ReviewerTask
             ReviewerTask.objects.filter(
-                cycle=cycle, status__in=['PENDING', 'IN_PROGRESS']
+                cycle=cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
             ).update(status='LOCKED')
 
         cycle.state = target_state

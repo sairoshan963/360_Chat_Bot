@@ -1,0 +1,486 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+VERSION	1.0
+
+STATUS	Draft
+
+DATE	March 10, 2026
+
+MODULE	360° Feedback - Phase 1
+
+
+
+
+Table of Contents
+
+
+1. Product Overview
+2. Product Objectives
+3. User Stories
+4. Scope
+5. Users and Roles
+6. Chat Interface Access
+7. Interaction Model
+8. Supported Commands (Phase 1)
+9. Command Execution Workflow
+10. Chat API Contract (Preliminary)
+11. Structured Command Model
+12. LLM Integration Strategy
+13. Conversation Workflow (Slot Filling)
+14. Response Delivery Model
+15. Error Handling
+16. Conversation History
+17. Conversation State Management
+18. Audit Logging
+19. Non-Functional Requirements
+20. Success Metrics
+21. Security and Access Control
+22. Integration with 360° Feedback System
+23. Deployment Architecture
+24. Future Expansion
+
+
+
+
+
+
+
+The AI Chat Assistant is designed to provide a natural language interface for interacting with the 360° Feedback System.
+Instead of navigating complex dashboards, users will be able to:
+• Retrieve information
+• Execute authorized commands
+ • Receive summaries and insights through a conversational chat interface.
+The assistant will operate as an intelligent command interface that translates user messages into structured system actions.
+The chatbot will not bypass backend logic and will operate strictly through existing system APIs with full permission validation.
+
+
+
+
+The primary objectives of the AI Chat Assistant are:
+• Simplify interaction with the 360° Feedback System.
+• Reduce navigation complexity for users.
+• Enable natural language access to system information.
+• Allow authorized users to execute system commands quickly.
+• Improve productivity for HR admins, managers, and employees.
+• Provide a foundation for future AI-driven enterprise automation.
+
+
+
+The following user stories describe key scenarios the AI Chat Assistant must support.
+
+
+
+
+
+
+
+
+
+
+
+
+4.1 Phase 1 Scope
+The AI Chat Assistant will support operations only for the 360° Feedback module. Supported domains include:
+• Feedback cycles
+• Review templates
+• Reviewer tasks
+• Feedback reports
+• Participation monitoring
+
+4.2 Out of Scope (Phase 1)
+The chatbot will not interact with other enterprise modules such as:
+• Payroll
+• Employee lifecycle management
+• HR operations
+• Financial systems
+Expansion to other modules may be considered in future phases.
+
+
+
+
+The chat assistant will respect the existing system roles.
+
+RoleDescriptionSuper AdminFull system accessHR AdminManages feedback cycles and templates
+
+
+
+RoleDescriptionManagerViews team progress and feedbackEmployeeAccesses personal feedbackThe chatbot will enforce all role-based permissions.
+
+
+
+
+The chat assistant will be accessible through two user interfaces.
+
+6.1 Floating Chat Widget
+• A chat icon will appear in the bottom-right corner of the web application.
+• Users can open the widget from any page to interact with the assistant.
+• This mode supports quick queries and actions.
+
+6.2 Dedicated Chat Page
+A full-page chat interface will also be available. This interface supports:
+• Long conversations
+• Command workflows
+• Reviewing conversation history
+• Detailed interactions
+
+
+
+The chat assistant will use a Hybrid Interaction Model. Users can interact using:
+• Natural language input
+• Suggested command shortcuts
+
+7.1 Example Natural Language Inputs
+• "Create a cycle for Engineering next month"
+• "Show pending reviews"
+• "Show my feedback summary"
+
+7.2 Example Suggested Commands
+
+
+Create Cycle
+Show Pending Reviews
+My Feedback Summary
+Cycle StatusThis hybrid model provides both flexibility and guided interaction.
+
+
+
+
+
+
+
+
+
+The chatbot will support both query commands and action commands.
+
+8.1 Query Commands
+These commands retrieve information and do not modify system data. Query commands do not require confirmation.
+
+CommandRoleDescriptionshow_my_feedbackEmployeeView personal feedback summaryshow_pending_reviewsManagerList pending review tasksshow_cycle_statusHR AdminView cycle progressshow_team_summaryManagerView team feedback overview
+8.2 Action Commands
+These commands modify system data. Action commands require confirmation before execution.
+
+CommandRoleDescriptioncreate_cycleHR AdminCreate new feedback cyclecreate_templateHR AdminCreate feedback template
+
+
+Command execution will follow this workflow:
+
+1. User submits a request.
+2. AI interprets the intent.
+3. System extracts parameters.
+4. Missing parameters are requested.
+5. System displays a confirmation summary.
+6. User confirms the action.
+7. Command is executed through backend APIs.
+
+9.1 Example Confirmation
+
+
+
+
+
+
+
+
+The chat assistant will communicate with the backend using REST APIs. The following endpoints represent the initial API design.
+
+10.1 Send Chat Message
+
+Request Example:
+
+Response Example:
+
+
+10.2 Confirm Command Execution
+
+Request Example:
+
+
+10.3 Retrieve Conversation History
+
+
+
+
+
+Response Example:
+
+
+
+
+The chat system will use a Structured Command Model. The AI will interpret messages and generate structured JSON describing the detected command.
+
+11.1 Example Command JSON
+
+The command engine will then validate and execute the request. This ensures:
+• Predictable system behavior
+• Strong security control
+• Safe command execution
+
+
+
+The AI Chat Assistant will use an external Large Language Model (LLM) provider for natural language understanding.
+
+The LLM will be responsible for:
+• Intent detection
+• Parameter extraction
+• Generating natural language responses
+• Summarization tasks
+The system will enforce structured command extraction to ensure deterministic system behavior.
+
+12.1 Prompt Structure
+Prompt structure will follow the pattern:
+
+
+
+
+
+The LLM output must always conform to the structured command schema used by the Command Engine.
+
+12.2 Fallback Behavior
+If the LLM fails to produce a valid structured command, the system will:
+
+1. Request clarification from the user.
+2. Suggest supported commands.
+
+The LLM layer will be designed to support multiple providers in the future.
+
+
+
+
+When required parameters are missing, the chatbot will request them interactively.
+
+13.1 Example Workflow
+
+Once all required parameters are collected, confirmation is requested.
+
+
+
+
+The system will implement a Hybrid Response Model.
+
+14.1 Streaming Responses
+Streaming responses will be used for:
+• Summaries
+• Explanations
+• AI-generated content
+The response will appear gradually as it is generated.
+
+14.2 Standard Responses
+Standard responses will be used for:
+• Confirmations
+
+
+
+
+• Command results
+• System notifications
+
+
+
+When the chatbot cannot understand a request:
+
+1. Inform the user the request was not understood.
+2. Ask the user to rephrase.
+3. Suggest available commands.
+
+15.1 Example Error Response
+
+
+
+
+The chat system will support both:
+• Previous conversation history
+ • New chat sessions Users can:
+• View past conversations
+• Resume previous conversations
+• Start new chats
+
+
+
+The system will use a Hybrid State Management Model.
+
+17.1 In-Memory Session Storage
+Active conversations will store temporary context in memory. Redis or equivalent memory store will be used.
+
+
+
+
+
+
+17.2 Persistent Storage
+Conversation history and command logs will be stored in the database. This enables:
+• Audit trails
+• Debugging
+• Analytics
+
+
+
+All chat interactions will be logged. This includes:
+• User messages
+• Detected intents
+• Executed commands
+• Rejected commands
+• System responses
+
+18.1 Example Log Record
+
+
+
+
+19.1 System Scale
+• The system will support up to 1,000 users within a single organization.
+• The architecture will remain SaaS-ready for future multi-tenant expansion.
+
+19.2 Performance Targets
+
+
+
+
+OperationTarget TimeIntent detection< 1 secondQuery responses< 3 secondsCommand execution< 5 secondsStreaming start< 1 second
+19.3 Concurrency
+The system must support:
+• Multiple simultaneous chat sessions
+• Concurrent command execution
+• Stable performance during peak usage
+
+19.4 Session Timeout
+Chat sessions expire after 15-30 minutes of inactivity.
+
+19.5 Reliability
+The system must gracefully handle:
+• LLM downtime
+• Backend API failures
+• Network interruptions
+Users must receive clear fallback messages.
+
+
+
+
+The effectiveness of the AI Chat Assistant will be evaluated using the following metrics.
+
+MetricTargetIntent detection accuracy>= 90%Command completion rate>= 85%Average turns to complete command<= 4Average response time< 3 secondsUser adoption rate>= 50% of active usersAdditional monitoring metrics include:
+• Command failure rate
+• LLM error rate
+
+
+
+
+• Average session duration
+• Number of unsupported queries
+
+
+
+The chatbot must respect all existing system governance including:
+• RBAC - Role-Based Access Control
+• ABAC - Attribute-Based Access Control
+• System business rules
+• Anonymity policies
+The chatbot must never bypass backend authorization.
+
+
+
+
+The chat assistant will interact with the existing 360° Feedback system through backend APIs.
+
+Primary integrations include:
+
+System FeatureAPI EndpointCreate feedback cyclePOST /feedback/cyclesRetrieve feedback summaryGET /feedback/summaryCheck pending reviewsGET /reviews/pendingRetrieve cycle statusGET /feedback/cycles/{id}The chat module will not access the database directly. All operations will be executed through existing service APIs.
+
+
+
+
+The system will follow a Modular Monolith Architecture. The chat assistant will exist as a separate module inside the backend system.
+
+23.1 Backend Technology
+Backend Framework: Django + Django REST Framework
+
+23.2 Chat Module Components
+The chat module will include:
+• Chat Controller
+
+
+
+
+• Intent Parser
+• Command Engine
+• LLM Service
+• Session Manager
+• Chat Logger
+
+23.3 Infrastructure Components
+
+ComponentPurposePostgreSQLPrimary databaseRedisSession storageLLM ProviderAI intent detectionDjango BackendCore system logic
+23.4 System Architecture
+
+?
+
+?
+?
+
+?
+?
+
+?
+?
+
+
+
+
+Future versions may include:
+• Multi-tenant SaaS architecture
+
+
+
+
+• AI analytics insights
+• Automation workflows
+• Integration with additional enterprise modules
+
+
+
+End of Document
+
+
+
+

@@ -56,13 +56,14 @@ export default function EmployeeTasksPage() {
     }},
     { title: 'Status',       dataIndex: 'status', render: (v) => <Tag color={STATUS_COLOR[v]||'default'}>{v}</Tag> },
     { title: 'Action', render: (_, r) => {
-      if (['SUBMITTED','LOCKED'].includes(r.status)) return <Button size="small" onClick={() => navigate(`/employee/tasks/${r.id}`)}>View</Button>;
+      const isLocked = ['SUBMITTED','LOCKED'].includes(r.status) || r.cycle_state !== 'ACTIVE';
+      if (isLocked) return <Button size="small" onClick={() => navigate(`/employee/tasks/${r.id}`)}>View</Button>;
       return <Button type="primary" size="small" onClick={() => navigate(`/employee/tasks/${r.id}`)}>{['IN_PROGRESS','DRAFT'].includes(r.status)?'Continue':'Start'}</Button>;
     }},
   ];
 
-  const pending   = visibleTasks.filter((t) => ['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status));
-  const completed = visibleTasks.filter((t) => ['SUBMITTED','LOCKED'].includes(t.status));
+  const pending   = visibleTasks.filter((t) => ['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status) && t.cycle_state === 'ACTIVE');
+  const completed = visibleTasks.filter((t) => ['SUBMITTED','LOCKED'].includes(t.status) || (['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status) && t.cycle_state !== 'ACTIVE'));
 
   if (loading) return <Space direction="vertical" size={16} style={{ width: '100%' }}><Card><Skeleton active paragraph={{ rows: 1 }} /></Card><Card><Skeleton active paragraph={{ rows: 5 }} /></Card></Space>;
   if (error) return <Space direction="vertical" size={16} style={{ width: '100%' }}><Card><Title level={4} style={{ margin: 0 }}>My Feedback Tasks</Title></Card><ErrorCard message="Could not load your tasks." onRetry={load} /></Space>;

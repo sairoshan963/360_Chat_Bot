@@ -11,9 +11,18 @@ backend/db.sqlite3
 backend/*.log
 
 # ─── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+.env.local
 backend/.env
 backend/.env.docker
 backend/.env.local
+
+# ─── Claude Code memory/config ────────────────────────────────────────────────
+.claude/
+
+# ─── Private data files ───────────────────────────────────────────────────────
+"Gamyam People.md"
+Gamyam\ People.md
 
 # .env.example is safe to commit (no real secrets)
 !backend/.env.example

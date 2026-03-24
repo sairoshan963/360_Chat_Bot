@@ -1,0 +1,793 @@
+﻿360° Feedback & Performance Intelligence System Technical Architecture Document
+
+1. EXECUTIVE SUMMARY
+1.1 Business Context
+Problem:
+Organizations require structured, secure, and psychologically safe multi-rater feedback systems to evaluate employee performance. Traditional spreadsheet-based reviews fail to provide controlled lifecycle enforcement, role-based access governance, anonymous feedback protection, immutable audit trails, and aggregated analytics.
+Solution:
+A governance-first platform with strong anonymity enforcement, deterministic workflow control, and enterprise-grade audit logging:
+• Structured feedback cycle lifecycle  (Draft → Nomination → Finalized → Active → Closed → Released → Archived)
+• Multi-reviewer types: Self, Manager, Peer, Direct Reports
+• Configurable anonymity states per reviewer type
+• Peer threshold enforcement (minimum 3 submissions before peer data is visible)
+• Snapshot-based reviewer assignment - org changes do not affect active cycles
+• Immutable post-closure data storage enforced at DB trigger level
+• Role-based dashboard analytics with stored aggregation
+• Append-only audit logging for all sensitive actions
+• Controlled async processing with intelligent reminder escalation engine
+• Modular Monolith architecture - single deployable, clean internal module boundaries
+
+1.2 Architecture Decisions - Locked
+Six architectural sections were evaluated and locked before system design started:
+
+SectionDecisionStatusA - Scale & Scope100 → 200 employees, internal-only, forever retentionLOCKEDB - Architecture StyleModular Monolith, single deployable backendLOCKEDC - Domain ModelStored aggregation (Option A), snapshot enforcementLOCKEDD - Async ProcessingControlled async, intelligent reminder engine (Option C)LOCKEDE - Security & GovernanceStrong identity separation (Option B), hybrid deleteLOCKEDF - Deployment & InfraE2E Cloud VPS, Docker, PostgreSQL, NginxLOCKED
+
+2. HIGH-LEVEL ARCHITECTURE
+
+
+
+2.1 System Scale & Assumptions
+
+Current Users100 employeesExpected Growth (2-3 years)200 employeesConcurrent CyclesMultiple parallel cycles supportedDeployment ScopeInternal only - single organizationTenancy ModelSingle-tenant architectureUptime RequirementBusiness-hours reliability acceptableData RetentionPermanent - forever retention policyPeak Load PatternModerate - no high concurrency spikes expected
+2.2 Architecture Principles
+Monolith First:
+• Single deployable backend service - no distributed microservices
+• Clear internal module boundaries enforced by folder structure and domain rules
+• Can extract to microservices later if scale demands it
+• All modules in one codebase with strict interface contracts
+Database as Source of Truth:
+• All workflow state stored in PostgreSQL
+• ACID transactions for all state transitions - no partial state
+• No external workflow engine (Temporal, Camunda, Step Functions) - complexity overkill
+• DB-level ENUMs and triggers enforce type safety and immutability
+Identity Separation:
+• Feedback content stored separately from reviewer identity mapping
+• Masking enforced at service layer - identity never appears in API response DTOs
+• Only Security module can access identity_mappings table
+Event-Driven Internal Processing:
+• State transitions trigger background jobs (reminders, auto-close, aggregation)
+• Idempotent job execution - safe to retry on any failure
+• Cron-based schedulers, no external queue needed at this scale
+
+2.3 Architecture Alternatives Considered
+Decision: Modular Monolith
+Alternatives Considered:
+• Microservices - distributed system overhead not justified for 100-200 users
+• Simple Monolith - no module boundaries, becomes unmaintainable as features grow
+• Serverless (AWS Lambda) - cold start issues, complex state management for stateful workflows
+Our System Characteristics:
+• ✅  Single organization, predictable load pattern
+• ✅  Linear state machine workflows - no distributed coordination needed
+• ✅  Fast execution - state transitions in milliseconds, not hours
+• ✅  Single team - monolith development speed advantage
+• Architecture designed to be portable to AWS with no code changes
+For 100-200 users, a Modular Monolith gives all the benefits of clean architecture without microservices overhead. We will revisit if scale grows beyond 1000 users.
+
+2.4 Core Module Breakdown
+
+ModuleResponsibilityBoundary RuleAuthentication & AccessLogin, session handling, role validation, RBAC enforcementDoes NOT know feedback logicOrganization ModuleEmployee records, org hierarchy, manager relationships, snapshot sourceDoes NOT know cycle stateReview Cycle EngineLifecycle states, transitions, config validation, lock enforcementDoes NOT process feedbackReviewer Workflow EngineAuto assignment, peer nomination, snapshot enforcement, task generationDoes NOT calculate scoresFeedback Processing EngineSubmission, identity separation, masking, threshold enforcement, aggregationMost sensitive moduleDashboard & AnalyticsAggregated metrics, filtering, risk indicators, role-based viewsReads processed data onlySecurity & Audit ModuleAll sensitive action logging, identity access tracking, export controlWraps all other modules
+
+3. WORKFLOW ARCHITECTURE
+3.1 Cycle State Machine
+The system implements a strict unidirectional cycle lifecycle. No backward transitions are permitted under normal operation. Reopen requires Super Admin override which is always audit logged with reason.
+
+
+
+3.2 Workflow Implementation Strategy
+Decision: Database-driven state machine  (ENUM status fields + service layer validation + DB triggers)
+Alternatives Considered:
+• Temporal - distributed workflow orchestration (for complex microservices, overkill for us)
+• AWS Step Functions - serverless workflow service (requires AWS, adds cost and vendor lock-in)
+• Camunda - Business Process Management platform (enterprise BPM, far too heavy)
+• Apache Airflow - workflow scheduler (designed for data pipelines, not request-driven feedback)
+Our Workflow Characteristics:
+• ✅  Simple linear state chain  (DRAFT → NOMINATION → FINALIZED → ACTIVE → CLOSED → RELEASED → ARCHIVED)
+• ✅  No complex branching logic or parallel execution paths
+• ✅  Fast execution - transitions complete in milliseconds
+• ✅  Deterministic transitions - clear rules, no ambiguity
+• Single service (Modular Monolith) - no distributed coordination needed
+For this scale and complexity, a database-driven state machine is the correct choice. We will revisit if workflow complexity increases significantly.
+
+3.3 Reviewer Task State Machine
+Each reviewer task follows its own lifecycle. LOCKED is a terminal state - no modification is permitted after the cycle closes. Reminders stop automatically when a reviewer reaches SUBMITTED.
+
+
+
+3.4 Cycle State Transition Table
+
+Current StateActionNext StateActorTransaction RequiredDRAFTActivate with nominationNOMINATIONHRYesDRAFTActivate - skip nominationFINALIZEDHRYesNOMINATIONDeadline reachedFINALIZEDSystemYesFINALIZEDAuto startACTIVESystemYesACTIVEDeadline reachedCLOSEDSystem (Scheduler)YesCLOSEDRelease resultsRESULTS_RELEASEDHRYesRESULTS_RELEASEDArchiveARCHIVEDHRYesAny (emergency)Super Admin overridePrevious stateSuper AdminYes + Audit Log
+Key Points:
+• No backward transitions allowed under any normal circumstance
+• Every transition is wrapped in a database transaction - all-or-nothing
+• All state changes are automatically audit logged
+• Super Admin reopen creates an immutable audit record with reason
+
+3.5 Snapshot Enforcement
+At finalization, the current org hierarchy is snapshotted. Future org changes do NOT affect an active cycle.
+
+Finalization Transaction (atomic - all or nothing):
+──────────────────────────────────────────────────
+1.  BEGIN TRANSACTION
+2.  SELECT review_cycles WHERE id = :id FOR UPDATE
+3.  Validate state = DRAFT or NOMINATION
+4.  SNAPSHOT org_hierarchy  →  freeze into reviewer_tasks
+5.  INSERT reviewer_tasks (all assignments, bulk)
+6.  Lock config: peer_min, peer_max, anonymity, template_id
+7.  UPDATE cycle state  →  FINALIZED
+8.  COMMIT
+
+If crash before COMMIT  →  automatic ROLLBACK, no partial tasks
+
+3.6 Key Workflow Features
+Peer Nomination:
+• Minimum 3 peers required - non-configurable during active cycle
+• Maximum peers configurable per cycle
+• Self-nomination not permitted
+• Nomination restricted to cycle participants only
+• Manager override allowed (audit logged)
+Audit Trail:
+• Every state change logged in audit_logs table
+• Records: actor, action, old/new state, timestamp, IP address, user agent
+• Immutable - append-only, no UPDATE or DELETE permitted
+• For compliance, debugging, and legal defensibility
+
+
+4. ANONYMITY & THRESHOLD ENFORCEMENT
+4.1 Anonymity States
+
+ModeBehaviorDefault ForANONYMOUSReviewer identity completely hidden - even HR cannot viewPeer reviewsSEMI_ANONYMOUSReviewer type shown but not identity (e.g., "a peer")Transparent culturesTRANSPARENTReviewer identity visible to reviewee and HRManager-to-direct
+Masking is enforced at service layer - identity_mappings repository is inaccessible outside the Security module. The masking happens before DTO construction, not at the controller.
+
+4.2 Peer Threshold Rule
+Minimum 3 peer submissions required before peer data appears in any report.
+If peer_submissions < 3:
+• Peer section is hidden from all reports and dashboard views
+• Peer scores are excluded from aggregation computation
+• Identity inference prevention maintained even from aggregate data
+• Rule is non-overridable during an active cycle - even Super Admin cannot bypass mid-cycle
+
+4.3 Identity Separation Architecture
+
+
+
+
+5. AGGREGATION & ASYNC PROCESSING
+5.1 End-to-End Data Flow
+
+
+
+5.2 Stored Aggregation Model
+Decision: Store aggregated results permanently at cycle closure (Option A)
+Alternatives Considered:
+• Dynamic recalculation on every dashboard load - slow, non-deterministic, dangerous if logic changes
+• Cache layer (Redis) with aggregation - adds infrastructure complexity, still not legally defensible
+Why Stored Aggregation was selected:
+• ✅  Deterministic - results never change over time even if scoring logic is updated later
+• ✅  Auditable - frozen results are legally defensible for HR performance decisions
+• ✅  Fast dashboard - reads precomputed values, no heavy joins on every view
+• Safe - a future code change cannot silently alter historical reports
+
+Cycle Closure Processing Flow:
+───────────────────────────────────────────────────────────
+1.  Scheduler detects cycles past review_deadline
+2.  SELECT review_cycles WHERE id = :id FOR UPDATE  (row lock)
+3.  Check if aggregated_results already exist  →  exit if yes (idempotent)
+4.  Lock all reviewer_tasks  →  LOCKED
+5.  Apply peer threshold rule (exclude peer data if < 3 submissions)
+6.  Compute per-reviewer-type averages
+7.  Compute overall_score, variance, risk indicators
+8.  INSERT aggregated_results  (UNIQUE per cycle + reviewee)
+9.  UPDATE cycle state  →  CLOSED
+10. COMMIT
+
+5.3 Background Job Architecture
+
+JobTriggerBehaviorIdempotentReminder SchedulerCron - every hourLive DB filter: tasks PENDING/IN_PROGRESS AND cycle ACTIVEYesAuto-Close SchedulerCron - every 30 minDetects cycles past review_deadline, triggers closure flowYesAggregation ProcessorOn cycle closureComputes and permanently stores all aggregated scoresYes
+5.4 Intelligent Reminder Engine
+Decision: Intelligent escalation model (Option C) - no HR configuration needed in Phase 1
+
+Day 1-2 after activationNo reminder  (settling period - reviewer needs time to plan)Day 3 to N-3Daily reminder to pending reviewersLast 3 days before deadlineDaily reminder continuesFinal dayMorning + afternoon  (2 reminders per day)After deadlineEscalate to manager + HR notificationAfter SUBMITTEDReminders stop immediately - excluded from next scheduler run
+
+Reminder eligibility filter (live DB query every scheduler run):
+  cycle_state = ACTIVE
+  AND task_status IN (PENDING, IN_PROGRESS)
+  AND review_deadline > NOW()
+
+After submission:
+  task_status = SUBMITTED  →  automatically excluded next run
+  No stored queue - always a live filter, never stale state
+
+
+6. DATABASE DESIGN
+6.1 Schema Overview
+Core Entities:
+
+users (4 roles, RBAC)
+  ↓ linked via
+org_hierarchy (manager-employee tree)
+  ↓ used to generate
+review_cycles (lifecycle orchestrator)
+  ↓ finalization creates
+reviewer_tasks (one per reviewer-reviewee-cycle)
+  ↓ completion creates
+feedback_responses + feedback_answers (immutable)
+
+Supporting:
+  identity_mappings  (Security module only)
+  aggregated_results (frozen post-closure)
+  audit_logs         (append-only)
+
+Design Principles:
+• Foreign keys with CASCADE/RESTRICT based on business logic - RESTRICT for career-impacting data
+• PostgreSQL ENUM types for all state fields - DB-level type safety, not VARCHAR
+• DB triggers enforce immutability as a second safety layer
+• Normalized answers table (not JSONB) - enables question-level analytics and indexing
+• Comprehensive indexes for all common query patterns
+
+
+
+6.2 ENUM Definitions
+
+CREATE EXTENSION IF NOT EXISTS 'pgcrypto';  -- UUID generation
+
+CREATE TYPE user_role AS ENUM
+  ('SUPER_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE');
+
+CREATE TYPE user_status AS ENUM
+  ('ACTIVE', 'INACTIVE', 'SUSPENDED');
+
+CREATE TYPE cycle_state AS ENUM (
+  'DRAFT', 'NOMINATION', 'FINALIZED', 'ACTIVE',
+  'CLOSED', 'RESULTS_RELEASED', 'ARCHIVED');
+
+CREATE TYPE reviewer_type AS ENUM
+  ('SELF', 'MANAGER', 'PEER', 'DIRECT_REPORT');
+
+CREATE TYPE reviewer_task_status AS ENUM
+  ('CREATED', 'PENDING', 'IN_PROGRESS', 'SUBMITTED', 'LOCKED');
+
+CREATE TYPE anonymity_type AS ENUM
+  ('ANONYMOUS', 'SEMI_ANONYMOUS', 'TRANSPARENT');
+
+CREATE TYPE question_type AS ENUM
+  ('RATING', 'TEXT');
+
+CREATE TYPE audit_action_type AS ENUM (
+  'CREATE_CYCLE', 'UPDATE_CYCLE', 'FINALIZE_CYCLE', 'START_CYCLE',
+  'CLOSE_CYCLE', 'RELEASE_RESULTS', 'ARCHIVE_CYCLE', 'SUBMIT_FEEDBACK',
+  'EXPORT_REPORT', 'OVERRIDE_ACTION', 'IDENTITY_ACCESS');
+
+6.3 Complete Database Schema
+users
+CREATE TABLE users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         VARCHAR(255) UNIQUE NOT NULL,
+  password      VARCHAR(255),                     -- nullable if SSO
+  first_name    VARCHAR(100) NOT NULL,
+  last_name     VARCHAR(100) NOT NULL,
+  role          user_role NOT NULL,
+  status        user_status DEFAULT 'ACTIVE',
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW(),
+  last_login_at TIMESTAMP,
+  CONSTRAINT valid_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$')
+);
+-- Soft delete via status = INACTIVE.  No hard DELETE allowed.
+
+org_hierarchy
+CREATE TABLE org_hierarchy (
+  employee_id  UUID PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
+  manager_id   UUID REFERENCES users(id) ON DELETE RESTRICT,
+  created_at   TIMESTAMP DEFAULT NOW()
+);
+
+review_templates  +  template_sections  +  template_questions
+CREATE TABLE review_templates (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          VARCHAR(255) NOT NULL,
+  description   TEXT,
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_by_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE template_sections (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id   UUID NOT NULL REFERENCES review_templates(id) ON DELETE CASCADE,
+  title         VARCHAR(255) NOT NULL,
+  display_order INTEGER NOT NULL CHECK (display_order > 0),
+  created_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE template_questions (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  section_id       UUID NOT NULL REFERENCES template_sections(id) ON DELETE CASCADE,
+  question_text    TEXT NOT NULL,
+  type             question_type NOT NULL,
+  rating_scale_min INTEGER,
+  rating_scale_max INTEGER,
+  is_required      BOOLEAN DEFAULT TRUE,
+  display_order    INTEGER NOT NULL CHECK (display_order > 0),
+  created_at       TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT rating_scale_check CHECK (
+    (type = 'RATING' AND rating_scale_min IS NOT NULL
+                     AND rating_scale_max IS NOT NULL)
+    OR (type = 'TEXT')
+  )
+);
+
+review_cycles  (Central Orchestrator)
+CREATE TABLE review_cycles (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                 VARCHAR(255) NOT NULL,
+  description          TEXT,
+  state                cycle_state DEFAULT 'DRAFT',
+  peer_min_count       INTEGER CHECK (peer_min_count >= 0),
+  peer_max_count       INTEGER CHECK (peer_max_count >= peer_min_count),
+  peer_anonymity       anonymity_type DEFAULT 'ANONYMOUS',
+  template_id          UUID NOT NULL REFERENCES review_templates(id) ON DELETE RESTRICT,
+  nomination_deadline  TIMESTAMP,
+  review_deadline      TIMESTAMP,
+  results_released_at  TIMESTAMP,
+  created_by_id        UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at           TIMESTAMP DEFAULT NOW(),
+  updated_at           TIMESTAMP DEFAULT NOW()
+);
+-- After FINALIZED: peer_min_count, peer_max_count, peer_anonymity,
+-- template_id all become immutable (service layer + trigger enforcement).
+
+reviewer_tasks
+One row = one reviewer reviewing one reviewee in one cycle. Created in bulk at finalization.
+CREATE TABLE reviewer_tasks (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cycle_id       UUID NOT NULL REFERENCES review_cycles(id) ON DELETE RESTRICT,
+  reviewee_id    UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  reviewer_id    UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  reviewer_type  reviewer_type NOT NULL,
+  anonymity_mode anonymity_type NOT NULL,
+  status         reviewer_task_status DEFAULT 'CREATED',
+  submitted_at   TIMESTAMP,
+  created_at     TIMESTAMP DEFAULT NOW(),
+  UNIQUE (cycle_id, reviewee_id, reviewer_id)
+);
+
+feedback_responses  +  feedback_answers
+feedback_responses is the submission header (immutable after insert). feedback_answers is normalized - one row per question answer.
+CREATE TABLE feedback_responses (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reviewer_task_id UUID NOT NULL UNIQUE
+                       REFERENCES reviewer_tasks(id) ON DELETE RESTRICT,
+  submitted_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE feedback_answers (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  response_id  UUID NOT NULL REFERENCES feedback_responses(id) ON DELETE CASCADE,
+  question_id  UUID NOT NULL REFERENCES template_questions(id) ON DELETE RESTRICT,
+  rating_value INTEGER,
+  text_value   TEXT,
+  created_at   TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT answer_type_check CHECK (
+    (rating_value IS NOT NULL AND text_value IS NULL)
+    OR (rating_value IS NULL AND text_value IS NOT NULL)
+  ),
+  UNIQUE (response_id, question_id)
+);
+
+identity_mappings  (Most Sensitive Table)
+CREATE TABLE identity_mappings (
+  reviewer_task_id UUID PRIMARY KEY
+                       REFERENCES reviewer_tasks(id) ON DELETE RESTRICT,
+  reviewer_id      UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at       TIMESTAMP DEFAULT NOW()
+);
+-- CRITICAL: Only Security module repository may access this table.
+-- All access must be logged: action_type = IDENTITY_ACCESS.
+
+aggregated_results  (Frozen - never updated)
+CREATE TABLE aggregated_results (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  cycle_id            UUID NOT NULL REFERENCES review_cycles(id) ON DELETE RESTRICT,
+  reviewee_id         UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  overall_score       NUMERIC(5,2),
+  self_score          NUMERIC(5,2),
+  manager_score       NUMERIC(5,2),
+  peer_score          NUMERIC(5,2),
+  direct_report_score NUMERIC(5,2),
+  computed_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (cycle_id, reviewee_id)
+);
+-- INSERT once at cycle closure.  UPDATE blocked by DB trigger.
+
+audit_logs  (Append-Only)
+CREATE TABLE audit_logs (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+  action_type audit_action_type NOT NULL,
+  entity_type VARCHAR(100) NOT NULL,
+  entity_id   UUID NOT NULL,
+  old_value   JSONB,
+  new_value   JSONB,
+  ip_address  VARCHAR(100),
+  user_agent  TEXT,
+  created_at  TIMESTAMP DEFAULT NOW()
+);
+-- APPEND ONLY: No UPDATE.  No DELETE.  INSERT only.
+-- actor_id ON DELETE SET NULL: log preserved if user is deleted.
+
+6.4 Index Strategy
+-- users
+CREATE INDEX idx_users_role      ON users(role);
+CREATE INDEX idx_users_status    ON users(status);
+
+-- review_cycles
+CREATE INDEX idx_cycles_state    ON review_cycles(state);
+CREATE INDEX idx_cycles_deadline ON review_cycles(review_deadline);
+
+-- reviewer_tasks
+CREATE INDEX idx_tasks_cycle     ON reviewer_tasks(cycle_id);
+CREATE INDEX idx_tasks_reviewee  ON reviewer_tasks(reviewee_id);
+CREATE INDEX idx_tasks_reviewer  ON reviewer_tasks(reviewer_id);
+CREATE INDEX idx_tasks_status    ON reviewer_tasks(status);
+
+-- feedback
+CREATE INDEX idx_answers_response ON feedback_answers(response_id);
+CREATE INDEX idx_answers_question ON feedback_answers(question_id);
+
+-- aggregated_results
+CREATE INDEX idx_agg_cycle       ON aggregated_results(cycle_id);
+CREATE INDEX idx_agg_reviewee    ON aggregated_results(reviewee_id);
+
+-- audit_logs
+CREATE INDEX idx_audit_actor     ON audit_logs(actor_id);
+CREATE INDEX idx_audit_entity    ON audit_logs(entity_type, entity_id);
+CREATE INDEX idx_audit_time      ON audit_logs(created_at);
+
+
+7. SECURITY ARCHITECTURE
+7.1 Access Enforcement Model
+All requests pass through a Centralized Access Guard Middleware. No controller directly checks roles - this prevents bypass via controller injection.
+Every request validates (in order):
+  1.  Authentication token validity
+  2.  Role authorization (RBAC check)
+  3.  Scope validation (cycle ownership)
+  4.  Anonymity state enforcement
+  5.  Threshold rule compliance
+
+7.2 Immutability Enforcement - DB Triggers
+Two-layer safety: service layer validates transitions, DB triggers prevent bypass. Even direct DB access or accidental migrations cannot corrupt core data.
+
+-- Prevent ARCHIVED cycle modification
+CREATE OR REPLACE FUNCTION validate_cycle_transition()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.state = 'ARCHIVED' THEN
+    RAISE EXCEPTION 'Archived cycles cannot be modified';
+  END IF;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER cycle_state_guard
+  BEFORE UPDATE ON review_cycles FOR EACH ROW
+  WHEN (OLD.state <> NEW.state)
+  EXECUTE FUNCTION validate_cycle_transition();
+
+-- Prevent LOCKED task modification
+CREATE OR REPLACE FUNCTION prevent_locked_task_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.status = 'LOCKED' THEN
+    RAISE EXCEPTION 'Locked reviewer tasks cannot be modified';
+  END IF;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+-- Feedback + aggregation immutability
+CREATE OR REPLACE FUNCTION prevent_immutable_update()
+RETURNS TRIGGER AS $$
+BEGIN RAISE EXCEPTION 'This record is immutable';
+END; $$ LANGUAGE plpgsql;
+
+-- Delete prevention on all core tables
+CREATE OR REPLACE FUNCTION prevent_core_delete()
+RETURNS TRIGGER AS $$
+BEGIN RAISE EXCEPTION 'Deletion not allowed on core tables';
+END; $$ LANGUAGE plpgsql;
+
+7.3 Hybrid Delete Strategy
+
+EntityStrategyReasonReview Cycle (after Finalized)No delete allowedCareer-impacting - legally sensitiveReviewer TaskNo delete allowedPart of audit lineageFeedback ResponseNo delete allowedImmutable post-submissionIdentity MappingNo delete allowedAnonymity protectionAudit LogNo delete allowedAppend-only by designDraft CycleSoft delete (is_active flag)Operational flexibilityEmployee (inactive)Soft delete (status = INACTIVE)User management
+
+8. CONCURRENCY & FAILURE RECOVERY
+8.1 Concurrency Strategy
+All critical state transitions use SELECT ... FOR UPDATE (row-level locking). This prevents race conditions in finalization, closure, and aggregation.
+
+-- Cycle finalization
+BEGIN;
+  SELECT * FROM review_cycles WHERE id = :cycle_id FOR UPDATE;
+  -- Validate state, snapshot org, INSERT tasks, UPDATE state
+COMMIT;
+
+-- Idempotent aggregation job
+SELECT 1 FROM aggregated_results WHERE cycle_id = :cycle_id LIMIT 1;
+-- If row exists  →  EXIT (job already completed, safe to skip)
+
+-- Duplicate submission protection
+-- UNIQUE (reviewer_task_id) on feedback_responses
+-- UNIQUE (response_id, question_id) on feedback_answers
+-- Double-click submit fails safely on second attempt
+
+8.2 Failure Recovery
+
+Failure ScenarioSystem BehaviorRecoveryCrash during finalizationTransaction rolls back automaticallyNo partial tasks - re-trigger finalizationCrash during aggregation (before insert)No aggregated_results row existsJob retried - idempotency check runs firstCrash after CLOSED, before aggregationCycle = CLOSED, results missingScheduler detects and re-triggers aggregationDouble scheduler executionSecond job finds results exist - exitsNo duplicate computation, no data corruptionDB connection failure mid-transactionROLLBACK on timeoutOperation can be safely retried
+
+9. THREAT MODELING & ANONYMITY PROTECTION
+
+ThreatAttack ScenarioProtection MechanismPeer Inference AttackEmployee with 1 peer review guesses identity from contentThreshold: min 3 submissions. Peer section hidden if below threshold.Identity Leakage via APIreviewer_id accidentally included in feedback DTOidentity_mappings isolated to Security module. Never in any DTO.Direct DB AccessDBA queries identity_mappings to match reviewer manuallyDB access restricted. All access logged as IDENTITY_ACCESS audit event.Manager PressureManager forces employee to reveal who gave low ratingAnonymous mapping not exposed. HR cannot view in ANONYMOUS mode.Race Condition ExploitDouble submission or rapid simultaneous state manipulationRow-level locking + UNIQUE constraints + transaction protection.Template Manipulation Mid-CycleHR edits template while cycle is activeTemplate snapshot at FINALIZED. template_id immutable. Trigger protection.Aggregation ManipulationAdmin tries to manually update aggregated_resultsUPDATE blocked by DB trigger. UNIQUE constraint prevents duplicate insert.Background Job ReplayAggregation job accidentally runs twice on same cycleExistence check before insert + UNIQUE constraint as final guard.Audit Log TamperingAttempt to delete or modify historical audit recordsDELETE and UPDATE both blocked by DB triggers on audit_logs.Soft Delete AbuseAttempt to erase feedback history via deletionCore entities have no delete mechanism - only status transitions.
+
+10. DEPLOYMENT & INFRASTRUCTURE
+10.1 E2E Cloud VPS Deployment
+Single VPS deployment on E2E Cloud. Dockerized for portability. Architecture is cloud-agnostic - can migrate to AWS/Azure with only environment config changes.
+
+E2E Cloud VPS
+│
+├── Nginx (Reverse Proxy)   Port 80/443 - SSL via Lets Encrypt
+│
+├── Node.js Backend (Docker Container)
+│     Background Job Runner + Cron Scheduler (inside app process)
+│
+└── PostgreSQL (Docker Container)
+      Not exposed publicly - internal network only
+
+Ports open to public80 (HTTP redirect), 443 (HTTPS only)SSH accessRestricted by IP whitelistDatabase exposureInternal only - not accessible from public networkSSL certificateLet's Encrypt (auto-renewing)Secrets managementEnvironment variables - no secrets in codebase
+10.2 Backup Strategy
+Daily backupAutomated pg_dump to secondary storageWeekly backupFull VPS snapshotRetention policyPermanent - forever retentionRestore testQuarterly restore verificationRecovery point objectiveMax 24 hours data loss acceptable
+10.3 Scaling Strategy
+Phase 1 - current (< 200 users)Vertical scaling - upgrade VPS instance sizePhase 2 - if scale > 1000 usersMigrate to AWS ECS + RDS - architecture is cloud-agnosticHorizontal scalingNot required - monolith scales vertically cleanly at this sizeKubernetesNot required - single container deployment for Phase 1
+
+11. MONITORING & METRICS
+
+MetricDefinitionAlert ThresholdSubmission ratePercentage of tasks submitted vs total assigned< 50% at 48h before deadlineCompletion rateCycles completed on time< 80% triggers HR reviewPeer participation ratePeers submitted vs peers assignedAlert if < threshold near deadlineSelf vs peer varianceDelta between self-score and peer averageFlag if variance > 2.0Department score distributionAverage scores per department per cycleHR review if significant outlier detectedJob failure rateBackground job errors per cycleAny failure triggers immediate alert
+
+12. FUTURE EXTENSIBILITY
+Architecture is designed for clean extension without breaking existing modules:
+Phase 2 - Planned:
+• AI-based feedback summarization - additive module, no core changes
+• Continuous feedback mode - new module, does not break the cycle engine
+• Multi-cycle comparison analytics - reads from aggregated_results, no schema change
+Phase 3 - Future:
+• Goal management module - separate module with loose coupling via userId
+• SaaS multi-tenant expansion - add tenant_id to tables (schema migration only)
+• AWS migration - Docker-based deployment, environment config swap only
+
+
+13. API DESIGN & CONTRACT
+13.1 Base URL & Auth
+
+Base URLhttps://api.yourdomain.com/v1AuthenticationBearer JWT - required on every request except /auth/loginToken headerAuthorization: Bearer <token>Content-Typeapplication/jsonRole enforcementAPI layer → Service layer → Data layer  (all three, never UI alone)
+Standard error envelope (all error responses):
+{
+  "success": false,
+  "error": {
+    "code":    "CYCLE_NOT_FOUND",       // machine-readable
+    "message": "Review cycle not found", // human-readable
+    "field":   "cycle_id"               // only on validation errors
+  }
+}
+
+HTTP status codes used:
+  200  OK              - successful GET / PUT
+  201  Created         - successful POST
+  400  Bad Request     - validation failure (missing field, min > max)
+  401  Unauthorized    - missing or invalid JWT
+  403  Forbidden       - valid JWT but insufficient role / scope
+  404  Not Found       - resource does not exist
+  409  Conflict        - duplicate submission, illegal state transition
+  422  Unprocessable   - business rule violation (peer count not met)
+  500  Server Error    - unhandled exception (never leaks stack trace)
+
+13.2 Authentication Endpoints
+
+MethodEndpointActorDescriptionPOST/auth/loginAllEmail + password → returns JWT + rolePOST/auth/logoutAllInvalidates session, audit loggedGET/auth/meAllReturns current user profile + rolePOST/auth/refreshAllRefresh JWT before expiry
+13.3 User & Organisation Endpoints
+
+MethodEndpointActorDescriptionGET/usersSuper AdminList all users with role + status filtersPOST/usersSuper AdminCreate user, assign rolePUT/users/:idSuper AdminUpdate user - name, role, statusDELETE/users/:idSuper AdminSoft delete → status = INACTIVEGET/users/:idAdmin / ManagerGet user profileGET/org/hierarchyHR AdminGet full org tree (manager → directs)GET/org/hierarchy/:userIdManager / HRGet hierarchy subtree for given userPUT/org/hierarchy/:userIdSuper AdminUpdate manager_id for employee
+13.4 Review Cycle Endpoints
+
+MethodEndpointActorDescriptionGET/cyclesHR Admin / Super AdminList all cycles with state filterPOST/cyclesHR AdminCreate cycle in DRAFT stateGET/cycles/:idAll (scoped)Get cycle detail + current statePUT/cycles/:idHR AdminUpdate DRAFT config - name, deadlines, template, peer configPOST/cycles/:id/activateHR AdminDRAFT → NOMINATION or FINALIZED (if skip-nomination)POST/cycles/:id/finalizeHR AdminNOMINATION → FINALIZED - triggers snapshot + task generationPOST/cycles/:id/releaseHR AdminCLOSED → RESULTS_RELEASED - enables employee reportsPOST/cycles/:id/archiveHR AdminRESULTS_RELEASED → ARCHIVEDPOST/cycles/:id/overrideSuper AdminEmergency reopen - audit logged with mandatory reason fieldGET/cycles/:id/progressHR Admin / ManagerSubmission completion % by reviewer type and department
+Illegal state transitions return 409 Conflict with machine-readable error code (e.g. INVALID_STATE_TRANSITION). Config edits after FINALIZED return 403 with CYCLE_LOCKED.
+
+13.5 Nomination Endpoints
+
+MethodEndpointActorDescriptionGET/cycles/:id/nominations/meEmployeeGet my current peer nominations for this cyclePOST/cycles/:id/nominationsEmployeeSubmit peer nominations - validated against min/max + scopePUT/cycles/:id/nominationsEmployeeEdit nominations before deadlineGET/cycles/:id/nominationsHR AdminView all nomination status across participantsPUT/cycles/:id/nominations/:revieweeIdManagerOverride / adjust peer nominations (if approval mode allows)
+POST /cycles/:id/nominations  - request body:
+{
+  "peer_ids": ["uuid-1", "uuid-2", "uuid-3"]
+}
+
+Validation rules enforced at service layer:
+  • peer_ids.length >= cycle.peer_min_count
+  • peer_ids.length <= cycle.peer_max_count
+  • No self-nomination (peer_ids must not contain requesting user)
+  • All peer_ids must be cycle participants
+  • No duplicates
+  • Cycle must be in NOMINATION state
+
+Error responses:
+  422  PEER_COUNT_BELOW_MINIMUM  - fewer peers than required
+  422  SELF_NOMINATION_NOT_ALLOWED
+  422  PEER_OUTSIDE_SCOPE
+  409  NOMINATION_WINDOW_CLOSED  - cycle no longer in NOMINATION state
+
+13.6 Feedback Task Endpoints
+
+MethodEndpointActorDescriptionGET/tasks/meEmployee / ManagerAll feedback tasks assigned to me across active cyclesGET/tasks/:idAssigned reviewerGet task detail + form questionsPUT/tasks/:id/draftAssigned reviewerSave partial draft - status → IN_PROGRESSPOST/tasks/:id/submitAssigned reviewerFinal submission - validates required fields, locks on deadline
+POST /tasks/:id/submit  - request body:
+{
+  "answers": [
+    { "question_id": "uuid-q1", "rating_value": 4 },
+    { "question_id": "uuid-q2", "rating_value": 5 },
+    { "question_id": "uuid-q3", "text_value": "Strong communicator." }
+  ]
+}
+
+System actions on submit (all in one transaction):
+  1.  Validate task status is PENDING or IN_PROGRESS
+  2.  Validate all required questions answered
+  3.  INSERT feedback_responses  (header record)
+  4.  INSERT feedback_answers    (one row per answer)
+  5.  INSERT identity_mappings   (reviewer_task_id → reviewer_id)
+  6.  UPDATE reviewer_task status → SUBMITTED
+  7.  INSERT audit_log           (SUBMIT_FEEDBACK)
+  8.  COMMIT
+
+Identity is separated at step 5 - never co-located with answers.
+Double submission blocked by UNIQUE (reviewer_task_id) on feedback_responses.
+
+13.7 Report & Dashboard Endpoints
+
+MethodEndpointActorDescriptionGET/reports/:cycleId/meEmployeeOwn feedback report - masked per anonymity config + threshold ruleGET/reports/:cycleId/:employeeIdManager / HRIndividual report for scoped employee - RBAC enforcedGET/dashboard/hr/:cycleIdHR AdminOrg-wide participation, completion rates, department scoresGET/dashboard/manager/:cycleIdManagerTeam-level scores, task completion, competency comparisonGET/dashboard/org/heatmapHR / Super AdminCompetency heatmap across departments and cyclesPOST/reports/:cycleId/exportHR / Super AdminExport report - audit logged (scope + timestamp + actor)
+GET /reports/:cycleId/me  - response envelope:
+{
+  "cycle_id": "uuid",
+  "reviewee": { "id": "uuid", "name": "John Doe" },
+  "overall_score": 4.1,
+  "sections": [
+    {
+      "reviewer_type": "MANAGER",
+      "score": 4.3,
+      "identity": { "name": "Jane Smith" },   // only if TRANSPARENT
+      "answers": [ ... ]
+    },
+    {
+      "reviewer_type": "PEER",
+      "score": 3.9,
+      "identity": null,                        // ANONYMOUS - never sent
+      "answers": [ ... ]
+    },
+    {
+      "reviewer_type": "PEER",
+      "hidden": true,                          // peer_submissions < 3
+      "reason": "BELOW_THRESHOLD"
+    }
+  ]
+}
+
+Masking is applied at service layer before DTO construction.
+identity field is never present in ANONYMOUS mode - not null, not empty, absent.
+
+
+14. TESTING STRATEGY
+14.1 Testing Philosophy
+The highest-risk areas in this system are the state machine, anonymity enforcement, peer threshold rule, and aggregation immutability. Testing is concentrated around these four areas. DB trigger enforcement is tested via integration tests against a real PostgreSQL instance - not mocked.
+
+14.2 Unit Tests - State Machine
+All state transition logic must be unit tested in isolation at the service layer. The DB is mocked.
+
+Test CaseInputExpected ResultValid transition: DRAFT → NOMINATIONcycle.state = DRAFT, peer enabledState updated, nomination deadline validatedValid transition: DRAFT → FINALIZED (skip)cycle.state = DRAFT, peer disabledState updated, tasks generated immediatelyInvalid transition: NOMINATION → ACTIVEcycle.state = NOMINATION (bypassing FINALIZED)409 INVALID_STATE_TRANSITIONInvalid transition: CLOSED → DRAFTAny backward transition attempt409 INVALID_STATE_TRANSITIONConfig edit after FINALIZEDPUT /cycles/:id with anonymity change403 CYCLE_LOCKEDFinalize with nomination incompletePeer count < peer_min_count422 NOMINATION_INCOMPLETEOverride by non-Super AdminHR Admin calls POST /cycles/:id/override403 INSUFFICIENT_ROLEOverride by Super Admin without reasonOverride body missing reason field400 REASON_REQUIRED
+14.3 Unit Tests - Anonymity & Threshold Enforcement
+
+Test CaseInputExpected ResultPeer section hidden below threshold2 peer submissions, threshold = 3Peer section absent from report DTOPeer section visible at threshold3 peer submissions, threshold = 3Peer section present, identity maskedIdentity absent in ANONYMOUS modereviewer_type = PEER, anonymity = ANONYMOUSidentity field not present in responseIdentity present in TRANSPARENT modereviewer_type = MANAGER, anonymity = TRANSPARENTidentity.name returnedIdentity null in SEMI_ANONYMOUS modereviewer_type = PEER, anonymity = SEMI_ANONYMOUSreviewer_type shown, identity nullEmployee cannot access another's reportEmployee A requests report for Employee B403 SCOPE_VIOLATIONHR cannot see anonymous identityHR Admin requests identity_mapping directly403 ANONYMITY_PROTECTEDSuper Admin identity access is audit loggedSuper Admin views identity in ANONYMOUS modeaudit_log INSERT with IDENTITY_ACCESS
+14.4 Unit Tests - Nomination Rules
+
+Test CaseInputExpected ResultSelf nomination blockedpeer_ids includes requesting user's own ID422 SELF_NOMINATION_NOT_ALLOWEDBelow minimum peer countpeer_ids.length = 2, peer_min = 3422 PEER_COUNT_BELOW_MINIMUMAbove maximum peer countpeer_ids.length = 6, peer_max = 5422 PEER_COUNT_ABOVE_MAXIMUMPeer outside cycle scopeNominated user not in cycle participant list422 PEER_OUTSIDE_SCOPEDuplicate peer nominatedpeer_ids contains duplicate UUID422 DUPLICATE_PEERNomination after window closedcycle.state = FINALIZED, not NOMINATION409 NOMINATION_WINDOW_CLOSED
+14.5 Integration Tests - Critical Flows
+Integration tests run against a real PostgreSQL test instance. DB triggers, UNIQUE constraints, and transaction rollbacks are verified end-to-end.
+
+FlowWhat is verifiedFull finalization transactionSnapshot created, tasks bulk-inserted, cycle state = FINALIZED - all in one COMMIT. If crash mid-way → full ROLLBACK, zero partial tasks.Duplicate submission protectionSubmit same task twice in rapid succession → second request returns 409. UNIQUE (reviewer_task_id) enforced at DB level.Aggregation idempotencyRun aggregation job twice on same closed cycle → second run detects existing row, exits cleanly. No duplicate aggregated_results.DB trigger: ARCHIVED cycle edit blockedAttempt UPDATE on ARCHIVED cycle → trigger raises exception. Returns 500 with IMMUTABLE_RECORD.DB trigger: LOCKED task edit blockedAttempt UPDATE on LOCKED reviewer_task → trigger raises exception. Submission after deadline blocked.DB trigger: feedback_responses immutableAttempt UPDATE on submitted feedback → trigger raises exception. No score tampering possible.Identity separation verificationSubmit feedback → verify feedback_answers contains no reviewer_id. identity_mappings exists in separate table only.Peer threshold in aggregation jobCycle closes with 2 peer submissions → aggregated_results.peer_score is NULL. Confirmed threshold rule applied.
+14.6 Test Infrastructure
+
+Unit test frameworkJest - service layer with mocked repositoriesIntegration test DBPostgreSQL in Docker - spun up fresh per test suiteDB seedingSeed scripts for users, org hierarchy, template, and cycle statesTest data isolationEach test creates its own cycle UUID - no shared stateCI triggerAll tests run on every PR before merge - no exceptionsCoverage targetState machine transitions: 100%.  Anonymity masking: 100%.  Other: ≥ 80%Trigger testsDB trigger enforcement verified via raw psql in integration suite
+
+15. PERFORMANCE ESTIMATES
+15.1 Design Assumptions
+
+Users100 → 200 employeesConcurrent active cycles2-3 at peakReviewer tasks per cycle~400-800 rows (200 employees × avg 3 reviewer types)Feedback answers per submission~10-20 answer rows per taskPeak load patternModerate - heaviest near review deadlines, not sustained high concurrencyDB serverE2E Cloud VPS - single PostgreSQL instance
+15.2 Operation-Level Estimates
+
+OperationExpected LatencyBottleneckMitigationUser login (JWT issue)< 100msbcrypt hash comparisonbcrypt rounds tuned to 10 - balances security and speedGET /tasks/me (active tasks list)< 80msJOIN across reviewer_tasks + cyclesidx_tasks_reviewer index covers this query directlyPOST /tasks/:id/submit (feedback submission)< 200ms7-step transaction: validate + 4 INSERTs + UPDATE + audit logSingle DB round trip - all in one transaction blockPOST /cycles/:id/finalize (snapshot + bulk task insert)< 500msBulk INSERT of ~400-800 reviewer_task rowsSingle INSERT ... VALUES batch - no row-by-row loopAggregation job (post-cycle closure)< 800msAggregate across ~400-800 tasks + answers per cyclePre-indexed on cycle_id - single pass aggregation queryGET /reports/:cycleId/me (employee report)< 100msRead from aggregated_results (pre-computed)Stored aggregation - no runtime JOIN on raw answersGET /dashboard/hr/:cycleId (org dashboard)< 150msMulti-department rollup from aggregated_resultsIndexed on cycle_id + reviewee_id - simple GROUP BYBackground reminder scheduler (hourly)< 2s total runLive filter across all ACTIVE tasksidx_tasks_status + idx_cycles_state - filters before email dispatch
+15.3 Index Justification
+reviewer_tasks is the most queried table at runtime - it is accessed on every task list, every reminder run, every submission, and every aggregation. It carries three indexes intentionally:
+• idx_tasks_cycle   - used by finalization, aggregation job, and cycle progress queries
+• idx_tasks_reviewer - used by GET /tasks/me (primary reviewer dashboard query)
+• idx_tasks_reviewee - used by report generation and manager team view
+• idx_tasks_status  - used by reminder scheduler live filter (PENDING + IN_PROGRESS)
+audit_logs carries a time-based index (idx_audit_time) because Super Admin audit queries almost always filter by date range. Without it, a full table scan on a growing append-only table would degrade over time.
+
+15.4 Scaling Triggers
+
+SignalThresholdActionConcurrent users> 500 simultaneousVertical VPS upgrade (CPU + RAM) - architecture is stateless, scales cleanlySubmission latency> 500ms p95Profile slow queries, add read replica for report endpointsAggregation job time> 5s per cycleMove aggregation to dedicated worker processTotal employees> 1,000Evaluate AWS migration - ECS + RDS - no code changes requiredStorage growth> 50GBArchive old cycle data to cold storage tier
+
+16. BOOTSTRAP & FIRST-RUN SETUP
+16.1 Initial Setup Sequence
+The system cannot process any feedback until four prerequisites are in place. This sequence must be completed in order:
+
+Step 1 - Run DB migrations
+  npm run migrate
+  Creates all tables, ENUMs, indexes, and triggers.
+  Idempotent - safe to re-run.
+
+Step 2 - Seed Super Admin account
+  npm run seed:admin
+  Creates one Super Admin user from environment variables:
+    ADMIN_EMAIL, ADMIN_PASSWORD (hashed via bcrypt)
+  Must be changed on first login.
+
+Step 3 - Import org hierarchy
+  POST /org/import  (Super Admin only)
+  Accepts CSV: employee_email, manager_email, department
+  Creates user records + org_hierarchy rows in one transaction.
+  Validates: no circular reporting, no self-reporting.
+
+Step 4 - Create review template
+  POST /templates  (HR Admin)
+  Define sections and questions before any cycle can be created.
+  At least one active template required before cycle creation.
+
+16.2 Org Hierarchy Import
+HR provides a CSV file. The import endpoint validates and loads it in a single transaction:
+
+CSV format (required columns):
+  employee_email, manager_email, department, role
+
+Validations applied before any INSERT:
+  • No circular reporting chains (A → B → A)
+  • No employee reporting to themselves
+  • manager_email must exist in the same file or already in DB
+  • Duplicate email → rejected with row number in error response
+
+On success: all rows inserted in one transaction.
+On any validation failure: full rollback, no partial import.
+
+Re-import: Subsequent imports UPDATE existing records.
+Mid-cycle: org changes do NOT affect active cycle snapshots.
+
+16.3 First Cycle Checklist
+
+1. DB migratednpm run migrate - all tables, triggers, indexes created2. Super Admin seedednpm run seed:admin - credentials set via env vars3. Org importedPOST /org/import - all employees + reporting lines loaded4. Template createdPOST /templates - at least one active template with sections and questions5. Cycle createdPOST /cycles - HR Admin creates DRAFT, configures peer settings and deadlines6. Cycle activatedPOST /cycles/:id/activate - triggers nomination window or goes direct to FINALIZED7. System readyEmployees receive task notifications, feedback collection begins
+16.4 Environment Variables
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=feedback_db
+DB_USER=feedback_user
+DB_PASSWORD=<secret>
+
+# Auth
+JWT_SECRET=<min-32-char-secret>
+JWT_EXPIRY=8h
+BCRYPT_ROUNDS=10
+
+# Bootstrap
+ADMIN_EMAIL=admin@yourcompany.com
+ADMIN_PASSWORD=<initial-password>
+
+# App
+PORT=3000
+NODE_ENV=production
+BASE_URL=https://api.yourdomain.com
+
+360° Feedback & Performance Intelligence System  -  Technical Architecture Document
+

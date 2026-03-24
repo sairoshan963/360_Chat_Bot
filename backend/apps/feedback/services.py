@@ -337,3 +337,123 @@ def export_employee_report_excel(cycle_id, employee_id, actor):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+# ─── Bulk Excel Export — All Reports for a Cycle ──────────────────────────────
+
+def export_all_reports_excel(cycle_id, actor):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+
+    from apps.users.models import User
+    from apps.review_cycles.models import ReviewCycle, CycleParticipant
+    from .models import AggregatedResult
+
+    cycle        = ReviewCycle.objects.get(id=cycle_id)
+    participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
+    employees    = [p.user for p in participants]
+
+    results_map = {
+        str(r.reviewee_id): r
+        for r in AggregatedResult.objects.filter(cycle=cycle, reviewee__in=employees)
+    }
+
+    header_fill       = PatternFill('solid', fgColor='1677FF')
+    header_font_white = Font(bold=True, color='FFFFFF')
+    bold              = Font(bold=True)
+
+    wb = openpyxl.Workbook()
+
+    # ── Summary sheet ────────────────────────────────────────────────────────
+    ws_summary = wb.active
+    ws_summary.title = 'Summary'
+
+    summary_headers = ['Name', 'Email', 'Department', 'Overall', 'Self', 'Manager', 'Peer']
+    ws_summary.append(summary_headers)
+    for col_idx, _ in enumerate(summary_headers, 1):
+        cell = ws_summary.cell(row=1, column=col_idx)
+        cell.font  = header_font_white
+        cell.fill  = header_fill
+        cell.alignment = Alignment(horizontal='center')
+
+    for emp in employees:
+        r = results_map.get(str(emp.id))
+        ws_summary.append([
+            emp.get_full_name(),
+            emp.email,
+            emp.department.name if emp.department else '',
+            float(r.overall_score) if r and r.overall_score else '',
+            float(r.self_score)    if r and r.self_score    else '',
+            float(r.manager_score) if r and r.manager_score else '',
+            float(r.peer_score)    if r and r.peer_score    else '',
+        ])
+
+    for col in ['A','B','C','D','E','F','G']:
+        ws_summary.column_dimensions[col].width = 22
+
+    # ── Per-employee sheets ──────────────────────────────────────────────────
+    for emp in employees:
+        sheet_name = emp.get_full_name()[:28]  # Excel sheet name limit
+        ws = wb.create_sheet(title=sheet_name)
+
+        ws.append(['360° Feedback Report'])
+        ws['A1'].font = Font(bold=True, size=13)
+        ws.append(['Cycle',     cycle.name])
+        ws.append(['Employee',  emp.get_full_name()])
+        ws.append(['Email',     emp.email])
+        ws.append([])
+
+        r = results_map.get(str(emp.id))
+        ws.append(['Score Summary'])
+        ws[f'A{ws.max_row}'].font = bold
+        ws.append([
+            'Overall', float(r.overall_score) if r and r.overall_score else '—',
+            'Self',    float(r.self_score)    if r and r.self_score    else '—',
+            'Manager', float(r.manager_score) if r and r.manager_score else '—',
+            'Peer',    float(r.peer_score)    if r and r.peer_score    else '—',
+        ])
+        ws.append([])
+
+        header_row = ws.max_row + 1
+        ws.append(['Reviewer Type', 'Reviewer', 'Question', 'Rating', 'Text Response'])
+        for col_idx in range(1, 6):
+            cell = ws.cell(row=header_row, column=col_idx)
+            cell.font  = header_font_white
+            cell.fill  = header_fill
+            cell.alignment = Alignment(horizontal='center')
+
+        sections = _get_feedback_sections(cycle, emp, actor.role, actor)
+        for section in sections:
+            if section.get('hidden'):
+                reviewer_name = 'Anonymous'
+            else:
+                identity = section.get('identity') or {}
+                reviewer_name = f"{identity.get('first_name','')} {identity.get('last_name','')}".strip() or 'Unknown'
+            for ans in section.get('answers', []):
+                ws.append([
+                    section['reviewer_type'],
+                    reviewer_name,
+                    ans['question_text'],
+                    ans['rating_value'] if ans['rating_value'] is not None else '',
+                    ans['text_value'] or '',
+                ])
+
+        ws.column_dimensions['A'].width = 16
+        ws.column_dimensions['B'].width = 22
+        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 40
+
+    AuditLog.log(actor=actor, action='EXPORT_REPORT', entity_type='report',
+                 entity_id=cycle_id, new_value={
+                     'exported_by': actor.get_full_name(),
+                     'cycle': cycle.name,
+                     'type': 'bulk_all',
+                     'count': len(employees),
+                 })
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer, cycle.name

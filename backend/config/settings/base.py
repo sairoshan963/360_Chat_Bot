@@ -45,6 +45,7 @@ LOCAL_APPS = [
     'apps.audit',
     'apps.announcements',
     'apps.support',
+    'apps.chat_assistant',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -178,6 +179,17 @@ EMAIL_HOST_USER  = config('EMAIL_HOST_USER',     default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL  = config('DEFAULT_FROM_EMAIL',  default='noreply@gamyam.com')
 
+# ─── Cache (Redis) ────────────────────────────────────────────────────────────
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": config('REDIS_URL', default='redis://localhost:6379/0'),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
+
 # ─── Celery ───────────────────────────────────────────────────────────────────
 
 CELERY_BROKER_URL        = config('REDIS_URL', default='redis://localhost:6379/0')
@@ -216,3 +228,54 @@ SPECTACULAR_SETTINGS = {
 # ─── Frontend URL (for password reset emails) ─────────────────────────────────
 
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+
+# ─── Chat Assistant ───────────────────────────────────────────────────────────
+
+COHERE_API_KEY = config('COHERE_API_KEY', default='')
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+# chat_assistant uses DEBUG level so every pipeline stage is visible.
+# All other Django internals stay at WARNING to avoid noise.
+# To see chat logs in Docker: sudo docker logs -f gamyam360-backend-1
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'chat_pipeline': {
+            'format': '[{asctime}] {message}',
+            'style': '{',
+            'datefmt': '%H:%M:%S',
+        },
+        'standard': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+            'datefmt': '%H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'chat_pipeline',
+        },
+    },
+    'loggers': {
+        # Full pipeline trace for chat — DEBUG shows every stage
+        'apps.chat_assistant': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        # Django internals — WARNING only, no noise
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        # Everything else — INFO
+        '': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+    },
+}

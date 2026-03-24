@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Descriptions, Tag, Button, Space, Typography, Table,
   Progress, Statistic, Row, Col, message, Popconfirm, Steps, Modal, Input,
-  Form, InputNumber, Tooltip, Select, DatePicker,
+  Form, InputNumber, Tooltip, Select, DatePicker, Transfer,
 } from 'antd';
 import { EyeOutlined, LockOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -12,7 +12,9 @@ import {
   activateCycle, finalizeCycle, closeCycle, releaseCycle, archiveCycle, overrideCycle,
   getAllNominations, updateCycle, approveNomination, rejectNomination,
   getParticipantStatus, downloadParticipantExcel, getNominationStatus, downloadNominationExcel,
+  addParticipants, removeParticipant,
 } from '../../api/cycles';
+import { listUsers } from '../../api/users';
 import useAuthStore from '../../store/authStore';
 import usePageTitle from '../../hooks/usePageTitle';
 
@@ -50,6 +52,11 @@ export default function CycleDetailPage() {
   const [editForm]          = Form.useForm();
   const [nomActionLoading,  setNomActionLoading]  = useState({});
   const [rejectNote,        setRejectNote]        = useState({});
+  const [addParticipantModal, setAddParticipantModal] = useState(false);
+  const [allUsers,            setAllUsers]            = useState([]);
+  const [selectedUserIds,     setSelectedUserIds]     = useState([]);
+  const [userSearch,          setUserSearch]          = useState('');
+  const [addingParticipants,  setAddingParticipants]  = useState(false);
 
   const handleNomApprove = async (nom) => {
     setNomActionLoading((p) => ({ ...p, [nom.id]: 'approve' }));
@@ -74,6 +81,36 @@ export default function CycleDetailPage() {
       message.error(err.response?.data?.message || 'Failed to reject');
     } finally {
       setNomActionLoading((p) => ({ ...p, [nom.id]: null }));
+    }
+  };
+
+  const openAddParticipantModal = async () => {
+    try {
+      const res = await listUsers({ status: 'ACTIVE', page_size: 500 });
+      const existingIds = new Set(participants.map((p) => p.id));
+      setAllUsers((res.data.users || res.data.results || []).filter((u) => !existingIds.has(u.id)));
+    } catch {
+      message.error('Could not load employees');
+      return;
+    }
+    setSelectedUserIds([]);
+    setUserSearch('');
+    setAddParticipantModal(true);
+  };
+
+  const handleAddParticipants = async () => {
+    if (!selectedUserIds.length) return;
+    setAddingParticipants(true);
+    try {
+      await addParticipants(id, selectedUserIds);
+      message.success(`${selectedUserIds.length} participant(s) added`);
+      setAddParticipantModal(false);
+      const res = await getParticipants(id);
+      setParticipants(res.data.participants || []);
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to add participants');
+    } finally {
+      setAddingParticipants(false);
     }
   };
 
@@ -514,7 +551,16 @@ export default function CycleDetailPage() {
                 .includes(participantSearch.toLowerCase()))
           : participants;
         return (
-          <Card title={`Participants (${filtered.length}${filtered.length !== participants.length ? ` / ${participants.length}` : ''})`}>
+          <Card
+            title={`Participants (${filtered.length}${filtered.length !== participants.length ? ` / ${participants.length}` : ''})`}
+            extra={
+              cycle.state === 'DRAFT' && (
+                <Button type="primary" size="small" onClick={openAddParticipantModal}>
+                  + Add Participants
+                </Button>
+              )
+            }
+          >
             <Input.Search
               placeholder="Search by name or email…"
               value={participantSearch}
@@ -553,6 +599,28 @@ export default function CycleDetailPage() {
                         </Tooltip>
                       ),
                 },
+                ...(cycle.state === 'DRAFT' ? [{
+                  title: '',
+                  width: 80,
+                  render: (_, r) => (
+                    <Popconfirm
+                      title="Remove this participant?"
+                      okText="Remove"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={async () => {
+                        try {
+                          await removeParticipant(id, r.id);
+                          message.success(`${r.first_name} ${r.last_name} removed`);
+                          setParticipants((prev) => prev.filter((p) => p.id !== r.id));
+                        } catch (err) {
+                          message.error(err.response?.data?.message || 'Failed to remove');
+                        }
+                      }}
+                    >
+                      <Button size="small" danger>Remove</Button>
+                    </Popconfirm>
+                  ),
+                }] : []),
               ]}
             />
           </Card>
@@ -731,6 +799,113 @@ export default function CycleDetailPage() {
             </>
           )}
         </Form>
+      </Modal>
+
+      {/* Add Participants Modal */}
+      <Modal
+        title="Add Participants"
+        open={addParticipantModal}
+        onOk={handleAddParticipants}
+        onCancel={() => setAddParticipantModal(false)}
+        okText={`Add ${selectedUserIds.length || ''} Selected`}
+        confirmLoading={addingParticipants}
+        okButtonProps={{ disabled: !selectedUserIds.length }}
+        width={800}
+      >
+        {(() => {
+          const departments = [...new Map(
+            allUsers.filter((u) => u.department && u.department_name)
+                    .map((u) => [u.department, u.department_name])
+          ).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+          const noDeptUsers = allUsers.filter((u) => !u.department);
+
+          const transferData = allUsers.map((u) => ({
+            key: u.id,
+            title: `${u.first_name} ${u.last_name} (${u.email})`,
+            department: u.department_name || '',
+            name: `${u.first_name} ${u.last_name}`,
+            email: u.email,
+          }));
+
+          const getDeptState = (deptId) => {
+            const ids = allUsers.filter((u) => u.department === deptId).map((u) => u.id);
+            const sel = ids.filter((id) => selectedUserIds.includes(id)).length;
+            return { checked: sel === ids.length && ids.length > 0, indeterminate: sel > 0 && sel < ids.length, total: ids.length, sel };
+          };
+
+          const toggleDept = (deptId, checked) => {
+            const ids = allUsers.filter((u) => u.department === deptId).map((u) => u.id);
+            setSelectedUserIds((prev) => checked ? [...new Set([...prev, ...ids])] : prev.filter((k) => !ids.includes(k)));
+          };
+
+          const noDeptState = (() => {
+            const ids = noDeptUsers.map((u) => u.id);
+            const sel = ids.filter((id) => selectedUserIds.includes(id)).length;
+            return { checked: sel === ids.length && ids.length > 0, indeterminate: sel > 0 && sel < ids.length, total: ids.length, sel };
+          })();
+
+          return (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14, padding: '12px 14px', background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0' }}>
+                <span style={{ fontSize: 12, color: '#888', fontWeight: 500, marginRight: 4 }}>Quick select:</span>
+                {departments.map(([deptId, deptName]) => {
+                  const { checked, indeterminate, total, sel } = getDeptState(deptId);
+                  return (
+                    <div key={deptId} onClick={() => toggleDept(deptId, !checked)} style={{
+                      cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '4px 12px', borderRadius: 20, fontSize: 13,
+                      border: `1px solid ${checked ? '#1677ff' : indeterminate ? '#fa8c16' : '#d9d9d9'}`,
+                      background: checked ? '#1677ff' : indeterminate ? '#fff7e6' : '#fff',
+                      color: checked ? '#fff' : indeterminate ? '#d46b08' : '#555',
+                    }}>
+                      {deptName}
+                      <span style={{ background: checked ? 'rgba(255,255,255,0.25)' : indeterminate ? '#ffd591' : '#f0f0f0', borderRadius: 10, padding: '0 6px', fontSize: 11, fontWeight: 600 }}>
+                        {sel}/{total}
+                      </span>
+                    </div>
+                  );
+                })}
+                {noDeptUsers.length > 0 && (
+                  <div onClick={() => { const ids = noDeptUsers.map((u) => u.id); setSelectedUserIds((prev) => noDeptState.checked ? prev.filter((k) => !ids.includes(k)) : [...new Set([...prev, ...ids])]); }} style={{
+                    cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 12px', borderRadius: 20, fontSize: 13,
+                    border: `1px solid ${noDeptState.checked ? '#8c8c8c' : noDeptState.indeterminate ? '#fa8c16' : '#d9d9d9'}`,
+                    background: noDeptState.checked ? '#8c8c8c' : noDeptState.indeterminate ? '#fff7e6' : '#fff',
+                    color: noDeptState.checked ? '#fff' : noDeptState.indeterminate ? '#d46b08' : '#555',
+                  }}>
+                    No Department
+                    <span style={{ background: noDeptState.checked ? 'rgba(255,255,255,0.25)' : noDeptState.indeterminate ? '#ffd591' : '#f0f0f0', borderRadius: 10, padding: '0 6px', fontSize: 11, fontWeight: 600 }}>
+                      {noDeptState.sel}/{noDeptState.total}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <Transfer
+                dataSource={transferData}
+                showSearch
+                filterOption={(input, item) =>
+                  item.title.toLowerCase().includes(input.toLowerCase()) ||
+                  (item.department || '').toLowerCase().includes(input.toLowerCase())
+                }
+                targetKeys={selectedUserIds}
+                onChange={setSelectedUserIds}
+                titles={['All Employees', 'Selected']}
+                render={(item) => (
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 4 }}>
+                    <span style={{ fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.name}
+                      <span style={{ color: '#aaa', fontSize: 11, marginLeft: 6 }}>({item.email})</span>
+                    </span>
+                    {item.department && <Tag color="geekblue" style={{ fontSize: 10, lineHeight: '18px', padding: '0 5px', margin: 0 }}>{item.department}</Tag>}
+                  </span>
+                )}
+                listStyle={{ width: '45%', height: 380 }}
+                style={{ width: '100%' }}
+              />
+            </>
+          );
+        })()}
       </Modal>
     </Space>
   );

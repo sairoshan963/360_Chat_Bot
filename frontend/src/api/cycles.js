@@ -76,6 +76,11 @@ export const addParticipants = (id, participant_ids) => {
   return api.post(`/cycles/${id}/participants/`, { participant_ids });
 };
 
+export const removeParticipant = (id, user_id) => {
+  if (USE_MOCK) return delay({ success: true });
+  return api.delete(`/cycles/${id}/participants/`, { data: { user_id } });
+};
+
 export const getParticipants = (id) => {
   if (USE_MOCK) {
     const participants = CYCLE_PARTICIPANTS[id] || [];

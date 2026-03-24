@@ -26,9 +26,13 @@ const ACTION_META = {
   IMPORT_ORG:       { color: 'geekblue', label: 'Import Org',       badge: 'processing' },
   EXPORT_REPORT:    { color: 'gold',     label: 'Export Report',    badge: 'default' },
   VIEW_REPORT:      { color: 'lime',     label: 'View Report',      badge: 'default' },
-  APPROVE_NOMINATION: { color: 'green', label: 'Approve Nomination', badge: 'success' },
-  REJECT_NOMINATION:  { color: 'red',   label: 'Reject Nomination',  badge: 'error' },
-  FINALIZE_CYCLE:   { color: 'blue',    label: 'Finalize Cycle',    badge: 'processing' },
+  APPROVE_NOMINATION:  { color: 'green',    label: 'Approve Nomination',  badge: 'success' },
+  REJECT_NOMINATION:   { color: 'red',      label: 'Reject Nomination',   badge: 'error' },
+  FINALIZE_CYCLE:      { color: 'blue',     label: 'Finalize Cycle',      badge: 'processing' },
+  USER_CREATED:        { color: 'purple',   label: 'User Created',        badge: 'processing' },
+  USER_UPDATED:        { color: 'cyan',     label: 'User Updated',        badge: 'default' },
+  USER_DEACTIVATED:    { color: 'orange',   label: 'User Deactivated',    badge: 'warning' },
+  ADMIN_PASSWORD_RESET:{ color: 'volcano',  label: 'Password Reset',      badge: 'warning' },
 };
 
 const ALL_ACTIONS = Object.keys(ACTION_META);

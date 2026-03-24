@@ -28,5 +28,6 @@ urlpatterns = [
     path('api/v1/audit/',         include('apps.audit.urls')),
     path('api/v1/announcements/', include('apps.announcements.urls')),
     path('api/v1/support/',       include('apps.support.urls')),
+    path('api/v1/chat/',          include('apps.chat_assistant.urls')),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

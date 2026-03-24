@@ -107,12 +107,12 @@ export default function CreateCyclePage() {
           <Input placeholder="e.g. Q1 2026 Performance Review" />
         </Form.Item>
         <Space wrap>
-          <Form.Item name="quarter" label="Quarter (Optional)">
+          <Form.Item name="quarter" label="Quarter">
             <Select placeholder="Select quarter" allowClear style={{ width: 120 }}>
               {['Q1','Q2','Q3','Q4'].map((q) => <Option key={q} value={q}>{q}</Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="quarter_year" label="Year (Optional)">
+          <Form.Item name="quarter_year" label="Year">
             <InputNumber placeholder="2025" min={2020} max={2030} style={{ width: 120 }} />
           </Form.Item>
         </Space>
@@ -150,7 +150,7 @@ export default function CreateCyclePage() {
                 {['ANONYMOUS','SEMI_ANONYMOUS','TRANSPARENT'].map((a) => <Option key={a} value={a}>{a.replace(/_/g,' ')}</Option>)}
               </Select>
             </Form.Item>
-            <Form.Item name="nomination_deadline" label="Nomination Deadline"><DatePicker showTime /></Form.Item>
+            <Form.Item name="nomination_deadline" label="Nomination Deadline" rules={[{ required: true, message: 'Nomination Deadline is required when peer review is enabled' }]}><DatePicker showTime /></Form.Item>
             <Form.Item name="nomination_approval_mode" label="Nomination Approval" initialValue="AUTO">
               <Select style={{ width: 220 }}>
                 <Option value="AUTO">Auto-approve (immediate)</Option>
