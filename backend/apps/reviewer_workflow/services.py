@@ -44,6 +44,8 @@ def get_task(task_id, user):
 
 
 def save_draft(task_id, user, answers):
+    from apps.review_cycles.models import TemplateQuestion
+
     task = get_task(task_id, user)
 
     if task.status not in ['CREATED', 'PENDING', 'IN_PROGRESS']:
@@ -51,6 +53,19 @@ def save_draft(task_id, user, answers):
 
     if task.cycle.state != 'ACTIVE':
         raise ValidationError('Cycle is not in active state')
+
+    # Validate that all question IDs in the draft belong to this cycle's template
+    if answers:
+        valid_q_ids = set(
+            str(qid) for qid in
+            TemplateQuestion.objects.filter(
+                section__template=task.cycle.template
+            ).values_list('id', flat=True)
+        )
+        submitted_q_ids = {str(a['question_id']) for a in answers if 'question_id' in a}
+        unknown = submitted_q_ids - valid_q_ids
+        if unknown:
+            raise ValidationError('Draft contains invalid question IDs')
 
     task.status        = 'IN_PROGRESS'
     task.draft_answers = answers
@@ -111,21 +126,37 @@ def submit_nominations(cycle_id, user, peer_ids):
         raise ValidationError(f'You must nominate at least {cycle.peer_min_count} peers')
 
     auto_approve = cycle.nomination_approval_mode == 'AUTO'
-    status       = 'APPROVED' if auto_approve else 'PENDING'
+    new_status   = 'APPROVED' if auto_approve else 'PENDING'
 
     with transaction.atomic():
-        PeerNomination.objects.filter(cycle=cycle, reviewee=user).delete()
+        # Keep APPROVED nominations — only delete PENDING/REJECTED so manager approvals
+        # are not wiped when an employee re-submits to replace a rejected nomination.
+        already_approved_ids = set(
+            str(pid) for pid in
+            PeerNomination.objects.filter(
+                cycle=cycle, reviewee=user, status='APPROVED'
+            ).values_list('peer_id', flat=True)
+        )
+
+        # Remove only non-approved nominations so they can be replaced
+        PeerNomination.objects.filter(
+            cycle=cycle, reviewee=user, status__in=['PENDING', 'REJECTED']
+        ).delete()
+
+        # Only create new nominations for peers not already approved
+        new_peer_ids = [pid for pid in peer_ids if pid not in already_approved_ids]
         nominations = [
             PeerNomination(
                 cycle=cycle,
                 reviewee=user,
                 peer_id=peer_id,
                 nominated_by=user,
-                status=status,
+                status=new_status,
             )
-            for peer_id in peer_ids
+            for peer_id in new_peer_ids
         ]
-        PeerNomination.objects.bulk_create(nominations, ignore_conflicts=True)
+        if nominations:
+            PeerNomination.objects.bulk_create(nominations, ignore_conflicts=True)
 
     AuditLog.log(actor=user, action='SUBMIT_NOMINATIONS',
                  entity_type='cycle', entity_id=cycle_id,
@@ -182,9 +213,9 @@ def decide_nomination(nomination_id, status, actor, rejection_note=None):
             raise PermissionDenied('You can only decide on nominations for your direct reports')
 
     nomination.status         = status
-    nomination.approved_by    = actor
-    nomination.approved_at    = timezone.now()
-    nomination.rejection_note = rejection_note or None
+    nomination.approved_by    = actor if status == 'APPROVED' else None
+    nomination.approved_at    = timezone.now() if status == 'APPROVED' else None
+    nomination.rejection_note = rejection_note if status == 'REJECTED' else None
     nomination.save(update_fields=['status', 'approved_by', 'approved_at', 'rejection_note'])
 
     AuditLog.log(actor=actor, action=f'NOMINATION_{status}',

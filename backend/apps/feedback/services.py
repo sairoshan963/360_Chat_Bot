@@ -218,10 +218,10 @@ def get_my_report(cycle_id, user):
         'cycle_id':      str(cycle_id),
         'cycle_name':    cycle.name,
         'reviewee':      {'id': str(user.id), 'name': user.get_full_name()},
-        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score else None,
-        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    else None,
-        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score else None,
-        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    else None,
+        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score is not None else None,
+        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    is not None else None,
+        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score is not None else None,
+        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    is not None else None,
         'sections':      sections,
     }
 
@@ -270,10 +270,10 @@ def get_employee_report(cycle_id, employee_id, viewer):
         'cycle_id':      str(cycle_id),
         'cycle_name':    cycle.name,
         'reviewee':      {'id': str(employee.id), 'name': employee.get_full_name(), 'email': employee.email},
-        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score else None,
-        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    else None,
-        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score else None,
-        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    else None,
+        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score is not None else None,
+        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    is not None else None,
+        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score is not None else None,
+        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    is not None else None,
         'sections':      sections,
     }
 
@@ -408,10 +408,10 @@ def export_all_reports_excel(cycle_id, actor):
         emp = p.user
         try:
             agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
-            overall = round(float(agg.overall_score), 2) if agg.overall_score else '—'
-            self_s  = round(float(agg.self_score),    2) if agg.self_score    else '—'
-            mgr_s   = round(float(agg.manager_score), 2) if agg.manager_score else '—'
-            peer_s  = round(float(agg.peer_score),    2) if agg.peer_score    else '—'
+            overall = round(float(agg.overall_score), 2) if agg.overall_score is not None else '—'
+            self_s  = round(float(agg.self_score),    2) if agg.self_score    is not None else '—'
+            mgr_s   = round(float(agg.manager_score), 2) if agg.manager_score is not None else '—'
+            peer_s  = round(float(agg.peer_score),    2) if agg.peer_score    is not None else '—'
         except AggregatedResult.DoesNotExist:
             overall = self_s = mgr_s = peer_s = '—'
 
@@ -449,10 +449,10 @@ def export_all_reports_excel(cycle_id, actor):
         try:
             agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
             ws.append([
-                'Overall', round(float(agg.overall_score), 2) if agg.overall_score else '—',
-                'Self',    round(float(agg.self_score),    2) if agg.self_score    else '—',
-                'Manager', round(float(agg.manager_score), 2) if agg.manager_score else '—',
-                'Peer',    round(float(agg.peer_score),    2) if agg.peer_score    else '—',
+                'Overall', round(float(agg.overall_score), 2) if agg.overall_score is not None else '—',
+                'Self',    round(float(agg.self_score),    2) if agg.self_score    is not None else '—',
+                'Manager', round(float(agg.manager_score), 2) if agg.manager_score is not None else '—',
+                'Peer',    round(float(agg.peer_score),    2) if agg.peer_score    is not None else '—',
             ])
         except AggregatedResult.DoesNotExist:
             ws.append(['No aggregated scores available'])

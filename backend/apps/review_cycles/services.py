@@ -529,9 +529,19 @@ def override_cycle(cycle_id, target_state, reason, actor):
         cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
         old_state = cycle.state
 
+        from apps.reviewer_workflow.models import ReviewerTask
+
+        # Generate tasks when overriding to ACTIVE if none exist yet
+        if target_state == 'ACTIVE' and not ReviewerTask.objects.filter(cycle=cycle).exists():
+            participants = list(
+                CycleParticipant.objects.filter(cycle=cycle)
+                .select_related('user__manager_relation__manager')
+            )
+            if participants:
+                _generate_reviewer_tasks(cycle, participants)
+
         # Lock tasks when moving to a closed state
         if target_state in ['CLOSED', 'RESULTS_RELEASED', 'ARCHIVED']:
-            from apps.reviewer_workflow.models import ReviewerTask
             ReviewerTask.objects.filter(
                 cycle=cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
             ).update(status='LOCKED')

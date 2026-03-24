@@ -1,6 +1,10 @@
+import logging
+
 from django.urls import path
 from django.http import JsonResponse
 from django.db import connection
+
+logger = logging.getLogger(__name__)
 
 
 def health(request):
@@ -12,7 +16,9 @@ def health_db(request):
         connection.ensure_connection()
         return JsonResponse({'success': True, 'db': 'ok'})
     except Exception as e:
-        return JsonResponse({'success': False, 'db': 'error', 'message': str(e)}, status=503)
+        # Log internally but never expose DB error details externally
+        logger.error('Health DB check failed: %s', e, exc_info=True)
+        return JsonResponse({'success': False, 'db': 'error'}, status=503)
 
 
 urlpatterns = [

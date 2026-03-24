@@ -36,7 +36,7 @@ class ReviewerTask(models.Model):
 
     class Meta:
         db_table        = 'reviewer_tasks'
-        unique_together = ('cycle', 'reviewee', 'reviewer')
+        unique_together = ('cycle', 'reviewee', 'reviewer', 'reviewer_type')
 
     def __str__(self):
         return f'{self.reviewer_type}: {self.reviewer} → {self.reviewee} [{self.status}]'

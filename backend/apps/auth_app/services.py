@@ -118,6 +118,8 @@ def change_password(user, current_password, new_password):
         raise ValidationError('Current password is incorrect')
     user.set_password(new_password)
     user.save(update_fields=['password'])
+    # Invalidate any outstanding password reset tokens so old links can't be used
+    PasswordResetToken.objects.filter(user=user).delete()
 
 
 # ─── Avatar Upload ────────────────────────────────────────────────────────────

@@ -36,9 +36,9 @@ def auto_close_cycles():
                 if locked_cycle.state != 'ACTIVE':
                     continue
 
-                # Lock all tasks
+                # Lock all tasks (include CREATED — never-started tasks)
                 ReviewerTask.objects.filter(
-                    cycle=locked_cycle, status__in=['PENDING', 'IN_PROGRESS']
+                    cycle=locked_cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
                 ).update(status='LOCKED')
 
                 # Aggregate (idempotent — safe to re-run)
@@ -152,6 +152,16 @@ def send_reminders():
 
         if not should_remind:
             continue
+
+        # ── Deduplication: skip if already sent within this hour window ────────
+        try:
+            from django.core.cache import cache
+            dedup_key = f"reminder:{group['reviewer_id']}:{group['cycle_id']}:{now.strftime('%Y%m%d%H')}"
+            if cache.get(dedup_key):
+                continue
+            cache.set(dedup_key, 1, timeout=3600)  # expire after 1 hour
+        except Exception as dedup_err:
+            logger.warning('[REMINDER] Dedup cache error (continuing): %s', dedup_err)
 
         deadline_str = deadline.strftime('%d %B %Y')
         sent = send_reminder(group['email'], group['first_name'], group['cycle_name'], deadline_str)
