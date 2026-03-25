@@ -124,18 +124,17 @@ class UserDetailView(APIView):
         if not user:
             return Response({'success': False, 'error': 'User not found'}, status=404)
         if user == request.user:
-            return Response({'success': False, 'error': 'Cannot deactivate your own account'}, status=400)
-        user.status = 'INACTIVE'
-        user.save(update_fields=['status'])
+            return Response({'success': False, 'error': 'Cannot delete your own account'}, status=400)
 
         from apps.audit.models import AuditLog
         AuditLog.log(
-            actor=request.user, action='USER_DEACTIVATED',
+            actor=request.user, action='USER_DELETED',
             entity_type='user', entity_id=user.id,
             new_value={'email': user.email, 'name': user.get_full_name()},
         )
 
-        return Response({'success': True, 'message': 'User deactivated'})
+        user.delete()
+        return Response({'success': True, 'message': 'User deleted'})
 
 
 # ─── Admin: Reset a specific user's password ─────────────────────────────────
