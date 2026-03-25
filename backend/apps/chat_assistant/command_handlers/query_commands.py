@@ -7,13 +7,22 @@ from django.utils import timezone
 
 
 def _fmt_date(dt):
-    """Format datetime to readable string."""
+    """Format a date-only field (DateField) to a readable string. No time, no timezone issue."""
     if not dt:
         return "N/A"
     try:
-        return dt.strftime("%d %b %Y, %I:%M %p")
+        return dt.strftime("%d %b %Y")
     except Exception:
-        return str(dt).split('.')[0]
+        return str(dt)[:10]
+
+def _iso(dt):
+    """Return ISO 8601 string for datetime fields. Frontend formats in user's local timezone."""
+    if not dt:
+        return None
+    try:
+        return dt.isoformat()
+    except Exception:
+        return str(dt)
 from .base import BaseCommand, db_uuid
 
 logger = logging.getLogger(__name__)
@@ -36,7 +45,6 @@ class ShowMyFeedbackCommand(BaseCommand):
                     WHERE ar.reviewee_id = %s
                       AND rc.state IN ('RESULTS_RELEASED', 'ARCHIVED')
                     ORDER BY rc.created_at DESC
-                    LIMIT 5
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -156,7 +164,6 @@ class ShowPendingReviewsCommand(BaseCommand):
                       AND rt.status IN ('CREATED', 'PENDING', 'IN_PROGRESS')
                       AND rc.state IN ('ACTIVE', 'CLOSED', 'RESULTS_RELEASED')
                     ORDER BY rc.created_at DESC, u.first_name
-                    LIMIT 30
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -197,13 +204,13 @@ class ShowCycleStatusCommand(BaseCommand):
                             SELECT name, state, review_deadline, nomination_deadline
                             FROM review_cycles
                             WHERE LOWER(name) LIKE %s
-                            ORDER BY created_at DESC LIMIT 20
+                            ORDER BY created_at DESC
                         """, [f'%{cycle_name.lower()}%'])
                     else:
                         cursor.execute("""
                             SELECT name, state, review_deadline, nomination_deadline
                             FROM review_cycles
-                            ORDER BY created_at DESC LIMIT 20
+                            ORDER BY created_at DESC
                         """)
                 else:
                     # Manager: only cycles where they or their direct reports participate
@@ -219,7 +226,7 @@ class ShowCycleStatusCommand(BaseCommand):
                                    )
                             )
                             AND LOWER(rc.name) LIKE %s
-                            ORDER BY rc.created_at DESC LIMIT 20
+                            ORDER BY rc.created_at DESC
                         """, [db_uuid(user.id), db_uuid(user.id), f'%{cycle_name.lower()}%'])
                     else:
                         cursor.execute("""
@@ -232,7 +239,7 @@ class ShowCycleStatusCommand(BaseCommand):
                                        SELECT employee_id FROM org_hierarchy WHERE manager_id = %s
                                    )
                             )
-                            ORDER BY rc.created_at DESC LIMIT 20
+                            ORDER BY rc.created_at DESC
                         """, [db_uuid(user.id), db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -280,7 +287,6 @@ class ShowTeamSummaryCommand(BaseCommand):
                         )
                     WHERE oh.manager_id = %s
                     GROUP BY u.id, u.first_name, u.last_name
-                    LIMIT 20
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -318,7 +324,6 @@ class ShowParticipationCommand(BaseCommand):
                     WHERE rc.state IN ('ACTIVE', 'CLOSED', 'RESULTS_RELEASED')
                     GROUP BY rc.id, rc.name, rc.state
                     ORDER BY rc.created_at DESC
-                    LIMIT 10
                 """)
                 rows = cursor.fetchall()
 
@@ -358,7 +363,6 @@ class ShowMyTasksCommand(BaseCommand):
                     WHERE rt.reviewer_id = %s
                       AND rc.state IN ('ACTIVE', 'CLOSED', 'RESULTS_RELEASED')
                     ORDER BY rc.created_at DESC, u.first_name
-                    LIMIT 30
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -398,7 +402,6 @@ class ShowCycleDeadlinesCommand(BaseCommand):
                         FROM review_cycles
                         WHERE state IN ('ACTIVE', 'NOMINATION', 'FINALIZED')
                         ORDER BY review_deadline ASC
-                        LIMIT 10
                     """)
                 else:
                     # Employee/Manager: only see deadlines for cycles they participate in
@@ -410,7 +413,6 @@ class ShowCycleDeadlinesCommand(BaseCommand):
                         WHERE cp.user_id = %s
                           AND rc.state IN ('ACTIVE', 'NOMINATION', 'FINALIZED')
                         ORDER BY rc.review_deadline ASC
-                        LIMIT 10
                     """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -458,7 +460,6 @@ class ShowMyNominationsCommand(BaseCommand):
                           WHERE cp.cycle_id = rc.id AND cp.user_id = %s
                       )
                     ORDER BY rc.created_at DESC, peer
-                    LIMIT 30
                 """, [db_uuid(user.id), db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -504,24 +505,22 @@ class ShowMyCyclesCommand(BaseCommand):
             with connection.cursor() as cursor:
                 if state_filter:
                     cursor.execute("""
-                        SELECT rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
+                        SELECT rc.id, rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
                         FROM cycle_participants cp
                         JOIN review_cycles rc ON cp.cycle_id = rc.id
                         WHERE cp.user_id = %s
                           AND rc.state = %s
                         ORDER BY rc.created_at DESC
-                        LIMIT 10
                     """, [db_uuid(user.id), state_filter])
                 else:
                     # Exclude DRAFT cycles — matches UI get_my_cycles()
                     cursor.execute("""
-                        SELECT rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
+                        SELECT rc.id, rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
                         FROM cycle_participants cp
                         JOIN review_cycles rc ON cp.cycle_id = rc.id
                         WHERE cp.user_id = %s
                           AND rc.state != 'DRAFT'
                         ORDER BY rc.created_at DESC
-                        LIMIT 10
                     """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -533,10 +532,11 @@ class ShowMyCyclesCommand(BaseCommand):
 
             cycles = [
                 {
-                    "name":                 r[0],
-                    "state":                r[1],
-                    "review_deadline":      _fmt_date(r[2]),
-                    "nomination_deadline":  _fmt_date(r[3]) if r[3] else None,
+                    "id":                   str(r[0]),
+                    "name":                 r[1],
+                    "state":                r[2],
+                    "review_deadline":      _fmt_date(r[3]),
+                    "nomination_deadline":  _fmt_date(r[4]) if r[4] else None,
                 }
                 for r in rows
             ]
@@ -569,7 +569,6 @@ class ShowTemplatesCommand(BaseCommand):
                     WHERE t.is_active = TRUE
                     GROUP BY t.id, t.name, t.description
                     ORDER BY t.created_at DESC
-                    LIMIT 10
                 """)
                 rows = cursor.fetchall()
 
@@ -615,7 +614,6 @@ class ShowTeamNominationsCommand(BaseCommand):
                       AND pn.status = 'PENDING'
                       AND rc.state IN ('NOMINATION', 'FINALIZED', 'ACTIVE')
                     ORDER BY u_reviewee.first_name, rc.created_at DESC
-                    LIMIT 40
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 
@@ -666,7 +664,6 @@ class ShowEmployeesCommand(BaseCommand):
                     LEFT JOIN departments d ON u.department_id = d.id
                     WHERE u.status = 'ACTIVE'
                     ORDER BY u.role, u.first_name
-                    LIMIT 50
                 """)
                 rows = cursor.fetchall()
 
@@ -674,10 +671,9 @@ class ShowEmployeesCommand(BaseCommand):
                 return {"success": True, "message": "No employees found.", "data": {"employees": []}}
 
             employees = [{"name": r[0], "email": r[1], "role": r[2], "department": r[3] or 'N/A'} for r in rows]
-            note = " (showing first 50 — use the UI to see all)" if len(employees) == 50 else ""
             return {
                 "success": True,
-                "message": f"Found {len(employees)} active employee(s){note}.",
+                "message": f"Found {len(employees)} active employee(s).",
                 "data": {"employees": employees}
             }
         except Exception as e:
@@ -700,7 +696,6 @@ class ShowAnnouncementsCommand(BaseCommand):
                     WHERE is_active = TRUE
                       AND (expires_at IS NULL OR expires_at > %s)
                     ORDER BY created_at DESC
-                    LIMIT 10
                 """, [now])
                 rows = cursor.fetchall()
 
@@ -708,7 +703,7 @@ class ShowAnnouncementsCommand(BaseCommand):
                 return {"success": True, "message": "No active announcements.", "data": {"announcements": []}}
 
             announcements = [
-                {"message": r[0], "type": r[1], "created_at": _fmt_date(r[2]), "expires_at": _fmt_date(r[3])}
+                {"message": r[0], "type": r[1], "created_at": _iso(r[2]), "expires_at": _iso(r[3])}
                 for r in rows
             ]
             return {
@@ -735,14 +730,13 @@ class ShowAuditLogsCommand(BaseCommand):
                     FROM audit_logs al
                     LEFT JOIN users u ON al.actor_id = u.id
                     ORDER BY al.created_at DESC
-                    LIMIT 15
                 """)
                 rows = cursor.fetchall()
 
             if not rows:
                 return {"success": True, "message": "No audit logs found.", "data": {"audit_logs": []}}
 
-            logs = [{"actor": r[0] or 'System', "action": r[1], "entity": r[2], "at": _fmt_date(r[3])} for r in rows]
+            logs = [{"actor": r[0] or 'System', "action": r[1], "entity": r[2], "at": r[3].isoformat() if r[3] else None} for r in rows]
             return {
                 "success": True,
                 "message": f"Showing {len(logs)} recent audit log entries.",
@@ -778,7 +772,6 @@ class ShowPendingApprovalsCommand(BaseCommand):
                         WHERE pn.status = 'PENDING'
                           AND rc.state IN ('NOMINATION', 'FINALIZED', 'ACTIVE')
                         ORDER BY pn.created_at DESC
-                        LIMIT 50
                     """)
                 else:
                     # MANAGER: only their team's nominations
@@ -801,7 +794,6 @@ class ShowPendingApprovalsCommand(BaseCommand):
                           AND pn.status = 'PENDING'
                           AND rc.state IN ('NOMINATION', 'FINALIZED', 'ACTIVE')
                         ORDER BY pn.created_at DESC
-                        LIMIT 30
                     """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
             if not rows:
@@ -815,7 +807,7 @@ class ShowPendingApprovalsCommand(BaseCommand):
                     "peer_email": r[4],
                     "cycle": r[5],
                     "status": r[6],
-                    "created_at": _fmt_date(r[7]),
+                    "created_at": _iso(r[7]),
                 }
                 for r in rows
             ]
@@ -867,7 +859,6 @@ class ShowCycleResultsCommand(BaseCommand):
                     JOIN users u ON ar.reviewee_id = u.id
                     WHERE ar.cycle_id = %s
                     ORDER BY ar.overall_score DESC NULLS LAST
-                    LIMIT 30
                 """, [cycle_id])
                 rows = cursor.fetchall()
 
@@ -1023,7 +1014,7 @@ class ExportNominationsCommand(BaseCommand):
                     "peer": r[2],
                     "peer_email": r[3],
                     "status": r[4],
-                    "nominated_on": _fmt_date(r[5]),
+                    "nominated_on": _iso(r[5]),
                 }
                 for r in rows
             ]
@@ -1071,7 +1062,7 @@ class ShowMyProfileCommand(BaseCommand):
                 "job_title":     row[3] or 'N/A',
                 "department":    row[4],
                 "status":        row[5] or 'N/A',
-                "member_since":  _fmt_date(row[6]),
+                "member_since":  _fmt_date(row[6]),  # date_joined — date only, no time needed
                 "manager":       row[7] or 'N/A',
                 "manager_email": row[8] or 'N/A',
             }
@@ -1231,7 +1222,6 @@ class WhoHasNotSubmittedCommand(BaseCommand):
                       AND rt.status != 'SUBMITTED'
                       AND rc.state = 'ACTIVE'
                     ORDER BY u_reviewer.first_name, rc.name
-                    LIMIT 50
                 """, [db_uuid(user.id)])
                 rows = cursor.fetchall()
 

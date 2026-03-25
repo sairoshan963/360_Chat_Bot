@@ -212,9 +212,11 @@ def _resolve_cycle_by_name(name_input: str) -> str | None:
                 return str(row[0])
 
             # 2. Fuzzy match — only if unambiguous (exactly one result)
+            # Escape LIKE wildcards to prevent injection
+            escaped_lower = lower.replace('%', '\\%').replace('_', '\\_')
             cursor.execute(
-                "SELECT id FROM review_cycles WHERE LOWER(name) LIKE %s",
-                [f'%{lower}%']
+                "SELECT id FROM review_cycles WHERE LOWER(name) LIKE %s ESCAPE '\\'",
+                [f'%{escaped_lower}%']
             )
             rows = cursor.fetchall()
             return str(rows[0][0]) if len(rows) == 1 else None
@@ -323,6 +325,58 @@ def _run_pipeline(user, message, display_message, session_id):
     )
     logger.debug("  SESSION : %s", _session_state)
 
+    # ── STARTUP GREETING ──────────────────────────────────────────────────────
+    if message.strip() == '__startup__':
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM reviewer_tasks rt
+                    JOIN review_cycles rc ON rt.cycle_id = rc.id
+                    WHERE rt.reviewer_id = %s
+                      AND rt.status IN ('CREATED','PENDING','IN_PROGRESS')
+                      AND rc.state = 'ACTIVE'
+                """, [str(user.id)])
+                pending_reviews = cursor.fetchone()[0]
+
+                pending_noms = 0
+                if user.role in ('MANAGER', 'HR_ADMIN', 'SUPER_ADMIN'):
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM peer_nominations pn
+                        JOIN review_cycles rc ON pn.cycle_id = rc.id
+                        WHERE pn.reviewee_id IN (
+                            SELECT employee_id FROM org_hierarchy WHERE manager_id = %s
+                        )
+                          AND pn.status = 'PENDING'
+                          AND rc.state IN ('NOMINATION','FINALIZED','ACTIVE')
+                    """, [str(user.id)])
+                    pending_noms = cursor.fetchone()[0]
+
+            name = user.display_name or user.get_full_name() or user.email.split('@')[0]
+            parts = []
+            if pending_reviews:
+                parts.append(f"**{pending_reviews}** pending review(s) to submit")
+            if pending_noms:
+                parts.append(f"**{pending_noms}** nomination(s) awaiting your approval")
+
+            if parts:
+                msg = f"Hi {name}! You have {' and '.join(parts)}.\n\nWhat would you like to do?"
+            else:
+                msg = f"Hi {name}! Everything looks clear — no pending reviews or approvals. What would you like to do?"
+
+            return {
+                "session_id": session_id, "intent": "__greeting__",
+                "status": "success", "message": msg,
+                "data": {"pending_reviews": pending_reviews, "pending_nominations": pending_noms},
+                "needs_input": False,
+            }
+        except Exception as e:
+            logger.error("Startup greeting error: %s", e)
+            return {
+                "session_id": session_id, "intent": "__greeting__",
+                "status": "success", "message": "Hi! What would you like to do?",
+                "data": {}, "needs_input": False,
+            }
+
     # ── Cancel escape: "cancel" / "stop" / "quit" at any point clears session ─
     if message.strip().lower() in ('cancel', 'stop', 'quit', 'exit', 'nevermind', 'never mind'):
         if session.get('intent'):
@@ -374,6 +428,25 @@ def _run_pipeline(user, message, display_message, session_id):
         logger.debug("  ⚠  PENDING CONFIRM for '%s' — auto-cancelled by new message", pending_intent)
         session_manager.clear_session(str(user.id))
         session = {}
+
+    # ── Context reference resolver: "cancel the second one", "activate it" ──
+    if not session.get('intent') and not session.get('awaiting_confirm'):
+        _resolved = _resolve_context_reference(message, session)
+        if _resolved:
+            intent_override, params_override = _resolved
+            logger.debug("  CTX REF   : resolved '%s' → intent=%s params=%s", message, intent_override, params_override)
+            from .command_registry import get_command as _get_cmd
+            _cmd = _get_cmd(intent_override)
+            if _cmd and user.role in _cmd.allowed_roles:
+                _result = _cmd.execute(params_override, user)
+                session_manager.clear_session(str(user.id))
+                _status = 'success' if _result.get('success') else 'error'
+                chat_logger.log_interaction(user, session_id, display_message or message, intent_override, params_override, _status, _result.get('message',''), False, response_data=_result.get('data',{}))
+                return {
+                    "session_id": session_id, "intent": intent_override,
+                    "status": _status, "message": _result.get('message',''),
+                    "data": _result.get('data', {}), "needs_input": False,
+                }
 
     # ── Phase 4: Early data-analysis bypass (SUPER_ADMIN / HR_ADMIN only) ───
     # Must happen BEFORE intent detection so the intent parser cannot intercept
@@ -720,32 +793,22 @@ def _run_pipeline(user, message, display_message, session_id):
             if not _re.match(r'^Q[1-4]\s+\d{4}$', qy.strip(), _re.IGNORECASE):
                 merged_params.pop('quarter_year', None)
 
-        # review_deadline — must parse to a known date format; reject freetext like "next month"
+        # review_deadline — flexible natural language parsing
         dl = merged_params.get('review_deadline', '')
         if dl:
-            _parsed = False
-            for _fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d'):
-                try:
-                    _dt.datetime.strptime(dl, _fmt)
-                    _parsed = True
-                    break
-                except ValueError:
-                    pass
-            if not _parsed:
+            parsed_dl = _parse_flexible_date(dl)
+            if parsed_dl:
+                merged_params['review_deadline'] = parsed_dl
+            else:
                 merged_params.pop('review_deadline', None)
 
-        # nomination_deadline — must parse or be "skip"
+        # nomination_deadline — flexible natural language parsing or "skip"
         ndl = merged_params.get('nomination_deadline', '')
         if ndl and ndl.lower() != 'skip':
-            _parsed = False
-            for _fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d'):
-                try:
-                    _dt.datetime.strptime(ndl, _fmt)
-                    _parsed = True
-                    break
-                except ValueError:
-                    pass
-            if not _parsed:
+            parsed_ndl = _parse_flexible_date(ndl)
+            if parsed_ndl:
+                merged_params['nomination_deadline'] = parsed_ndl
+            else:
                 merged_params.pop('nomination_deadline', None)
 
         # nomination_approval — must be auto/manual/skip; anything else re-asks
@@ -877,8 +940,8 @@ def _run_pipeline(user, message, display_message, session_id):
                 'rejection_note':      'Please provide a reason for rejecting this nomination.\n*(e.g. "Not relevant to this cycle" or "Conflict of interest")*',
                 'description':         'Add a description for this cycle, or type **skip**.',
                 'quarter_year':        'Which quarter and year? (e.g. "Q3 2026") or type **skip**.',
-                'review_deadline':     'When is the review deadline? Use format YYYY-MM-DD (e.g. 2026-09-30).',
-                'nomination_deadline': 'When is the nomination deadline? Use YYYY-MM-DD, or type **skip** for no deadline.',
+                'review_deadline':     'When is the review deadline? (e.g. "Sep 30", "end of Q3", "in 2 weeks", "2026-09-30")',
+                'nomination_deadline': 'When is the nomination deadline? (e.g. "Sep 15", "end of August") or type **skip**.',
                 'nomination_approval': 'Should nominations require manual manager approval? Type **manual** or **auto** (or **skip** for auto).',
                 'peer_enabled':        'Enable peer review? Please type **yes** or **no**.',
                 'peer_count':          'How many peers? Enter min and max separated by "to" (e.g. "2 to 5"). Min must be ≥ 1.',
@@ -901,6 +964,19 @@ def _run_pipeline(user, message, display_message, session_id):
             response_msg = _step_prefix(base_msg)
             data = {}
 
+        # Build quick-pick options for fields with known choices
+        _now_year = timezone.now().year
+        _FIELD_OPTIONS = {
+            'quarter_year':        [f'Q1 {_now_year}', f'Q2 {_now_year}', f'Q3 {_now_year}', f'Q4 {_now_year}',
+                                    f'Q1 {_now_year+1}', f'Q2 {_now_year+1}', 'skip'],
+            'nomination_approval': ['manual', 'auto'],
+            'peer_enabled':        ['yes', 'no'],
+            'peer_count':          ['2 to 3', '3 to 4', '3 to 5', '4 to 6'],
+            'description':         ['skip'],
+            'nomination_deadline': ['skip'],
+        }
+        field_options = _FIELD_OPTIONS.get(next_field, [])
+
         logger.debug(
             "  WAITING : needs '%s'  →  asking user",
             next_field
@@ -917,6 +993,7 @@ def _run_pipeline(user, message, display_message, session_id):
             "data":          data,
             "needs_input":   True,
             "missing_field": next_field,
+            "field_options": field_options,
         }
 
     # ── PIPELINE STAGE 7: Action confirmation gate ────────────────────────
@@ -1066,6 +1143,27 @@ def _run_pipeline(user, message, display_message, session_id):
             "data":           result.get('data', {}),
             "needs_input":    False,
         }
+
+    # ── Track last shown list for context follow-ups ──────────────────────
+    if result.get('success') and result.get('data'):
+        _d = result['data']
+        _last = None
+        if _d.get('cycles'):
+            _last = {'type': 'cycles', 'items': [{'id': c.get('id'), 'name': c.get('name')} for c in _d['cycles'] if c.get('id')]}
+        elif _d.get('grouped_nominations'):
+            _last = {'type': 'nominations', 'items': [
+                {'id': n.get('nomination_id'), 'label': f"{n.get('peer')} → {g.get('cycle','')}"}
+                for g in _d['grouped_nominations'] for n in g.get('nominations', []) if n.get('nomination_id')
+            ]}
+        elif _d.get('pending_approvals'):
+            _last = {'type': 'nominations', 'items': [
+                {'id': a.get('nomination_id'), 'label': f"{a.get('reviewee')} ← {a.get('peer')}"}
+                for a in _d['pending_approvals'] if a.get('nomination_id')
+            ]}
+        if _last and _last['items']:
+            _cur_sess = session_manager.get_session(str(user.id)) or {}
+            _cur_sess['last_shown'] = _last
+            session_manager.save_session(str(user.id), _cur_sess)
 
     chat_logger.log_interaction(
         user, session_id, display_message, intent, merged_params, exec_status, result['message'], used_llm,
@@ -1558,8 +1656,16 @@ class ChatHistoryView(APIView):
 
 
 class ChatSessionsView(APIView):
-    """GET /api/v1/chat/sessions/ — list distinct sessions with LLM-generated titles."""
+    """
+    GET    /api/v1/chat/sessions/ — list distinct sessions with LLM-generated titles.
+    DELETE /api/v1/chat/sessions/ — delete ALL chat history for the current user.
+    """
     permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        deleted, _ = ChatLog.objects.filter(user=request.user).delete()
+        session_manager.clear_session(str(request.user.id))
+        return Response({"deleted": True, "count": deleted})
 
     def get(self, request):
         from django.db.models import Max, Min
@@ -1691,6 +1797,174 @@ class ChatAnalyticsView(APIView):
             'per_user_activity': per_user_data,
             'failed_intents':   failed_intents,
         })
+
+
+def _resolve_context_reference(message: str, session: dict):
+    """
+    Detect ordinal references to previously shown items.
+    e.g. "cancel the second one", "activate it", "close the 3rd cycle"
+    Returns (intent, params) or None.
+    """
+    import re as _re
+    last = session.get('last_shown')
+    if not last or not last.get('items'):
+        return None
+
+    text = message.strip().lower()
+    items = last['items']
+
+    # Map action words → intents (for cycles)
+    CYCLE_ACTIONS = {
+        'cancel': 'cancel_cycle', 'activate': 'activate_cycle',
+        'close': 'close_cycle', 'release': 'release_results',
+        'release results': 'release_results', 'release result': 'release_results',
+    }
+    ORDINALS = {
+        'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2,
+        'fourth': 3, '4th': 3, 'fifth': 4, '5th': 4, 'sixth': 5, '6th': 5,
+        'last': -1, 'it': None, 'that': None, 'this': None, 'that one': None, 'this one': None,
+    }
+
+    # Match: "<action> (the)? <ordinal> (one|cycle)?"
+    for action, intent in CYCLE_ACTIONS.items():
+        pattern = _re.compile(
+            rf'\b{_re.escape(action)}\b[\w\s]*(the\s+)?(\b(?:' +
+            '|'.join(_re.escape(k) for k in ORDINALS) +
+            r'|\d+(?:st|nd|rd|th)?)\b)',
+            _re.IGNORECASE
+        )
+        m = pattern.search(text)
+        if m:
+            raw = m.group(2).lower().strip()
+            # numeric like "2nd", "3rd"
+            num_m = _re.match(r'(\d+)', raw)
+            if num_m:
+                idx = int(num_m.group(1)) - 1
+            elif raw in ORDINALS:
+                idx = ORDINALS[raw]
+            else:
+                continue
+            try:
+                item = items[idx]
+            except IndexError:
+                continue
+            if item.get('id') and last['type'] == 'cycles':
+                return (intent, {'cycle_id': item['id']})
+
+    # "it" / "that" alone — only if single item or last item shown
+    if _re.match(r'^(it|that|this|that one|this one)$', text) and last['type'] == 'cycles':
+        # Ambiguous — can't resolve without an action
+        return None
+
+    return None
+
+
+def _parse_flexible_date(text: str) -> str | None:
+    """
+    Parse natural language and standard date strings into YYYY-MM-DD.
+    Handles: strict formats, "end of September", "next month", "in 2 weeks",
+    "Sep 30", "30 Sep 2026", "end of Q3", "next Friday", "tomorrow", etc.
+    Returns YYYY-MM-DD string or None if unrecognisable.
+    """
+    import re as _re
+    import datetime as _dt
+    import calendar
+
+    text = text.strip()
+    today = _dt.date.today()
+
+    # 1. Strict standard formats first
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d %b %Y', '%d %B %Y', '%b %d %Y', '%B %d %Y', '%d %b', '%d %B', '%b %d', '%B %d'):
+        try:
+            d = _dt.datetime.strptime(text, fmt).date()
+            # If year wasn't in format, use current or next year intelligently
+            if '%Y' not in fmt and '%y' not in fmt:
+                d = d.replace(year=today.year)
+                if d < today:
+                    d = d.replace(year=today.year + 1)
+            return d.strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+
+    tl = text.lower().strip()
+
+    # 2. Relative: today / tomorrow / yesterday
+    if tl in ('today',):
+        return today.strftime('%Y-%m-%d')
+    if tl in ('tomorrow',):
+        return (today + _dt.timedelta(days=1)).strftime('%Y-%m-%d')
+
+    # 3. "in N days/weeks/months"
+    m = _re.match(r'in\s+(\d+)\s+(day|days|week|weeks|month|months)', tl)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        if 'day' in unit:
+            return (today + _dt.timedelta(days=n)).strftime('%Y-%m-%d')
+        if 'week' in unit:
+            return (today + _dt.timedelta(weeks=n)).strftime('%Y-%m-%d')
+        if 'month' in unit:
+            month = today.month + n
+            year = today.year + (month - 1) // 12
+            month = (month - 1) % 12 + 1
+            day = min(today.day, calendar.monthrange(year, month)[1])
+            return _dt.date(year, month, day).strftime('%Y-%m-%d')
+
+    # 4. "next week/month/year"
+    if tl == 'next week':
+        return (today + _dt.timedelta(weeks=1)).strftime('%Y-%m-%d')
+    if tl == 'next month':
+        month = today.month % 12 + 1
+        year = today.year + (1 if today.month == 12 else 0)
+        last_day = calendar.monthrange(year, month)[1]
+        return _dt.date(year, month, last_day).strftime('%Y-%m-%d')
+    if tl == 'next year':
+        return _dt.date(today.year + 1, 12, 31).strftime('%Y-%m-%d')
+
+    # 5. "end of <month>" or "end of <month> <year>"
+    MONTHS = {'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
+              'july':7,'august':8,'september':9,'october':10,'november':11,'december':12,
+              'jan':1,'feb':2,'mar':3,'apr':4,'jun':6,'jul':7,'aug':8,
+              'sep':9,'oct':10,'nov':11,'dec':12}
+    m = _re.match(r'end\s+of\s+(\w+)(?:\s+(\d{4}))?', tl)
+    if m:
+        mon_name, yr = m.group(1), m.group(2)
+        mon = MONTHS.get(mon_name)
+        if mon:
+            yr = int(yr) if yr else (today.year if mon >= today.month else today.year + 1)
+            last_day = calendar.monthrange(yr, mon)[1]
+            return _dt.date(yr, mon, last_day).strftime('%Y-%m-%d')
+
+    # 6. "end of Q1/Q2/Q3/Q4" or "Q3 end"
+    m = _re.search(r'q([1-4])', tl)
+    if m and ('end' in tl or 'last' in tl or tl.startswith('q')):
+        q = int(m.group(1))
+        end_month = q * 3
+        yr_m = _re.search(r'\d{4}', tl)
+        yr = int(yr_m.group()) if yr_m else today.year
+        last_day = calendar.monthrange(yr, end_month)[1]
+        return _dt.date(yr, end_month, last_day).strftime('%Y-%m-%d')
+
+    # 7. "next <weekday>"
+    DAYS = {'monday':0,'tuesday':1,'wednesday':2,'thursday':3,'friday':4,'saturday':5,'sunday':6,
+            'mon':0,'tue':1,'wed':2,'thu':3,'fri':4,'sat':5,'sun':6}
+    m = _re.match(r'next\s+(\w+)', tl)
+    if m:
+        day_name = m.group(1)
+        target = DAYS.get(day_name)
+        if target is not None:
+            days_ahead = (target - today.weekday()) % 7 or 7
+            return (today + _dt.timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+
+    # 8. "<month> <year>" e.g. "September 2026" → last day of that month
+    m = _re.match(r'(\w+)\s+(\d{4})$', tl)
+    if m:
+        mon = MONTHS.get(m.group(1))
+        if mon:
+            yr = int(m.group(2))
+            last_day = calendar.monthrange(yr, mon)[1]
+            return _dt.date(yr, mon, last_day).strftime('%Y-%m-%d')
+
+    return None
 
 
 def _get_cycle_name(cycle_id: str) -> str:

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Button, Avatar, Tooltip } from 'antd';
+import { Input, Button, Avatar, Tooltip, Popconfirm } from 'antd';
 import {
   SendOutlined, RobotOutlined, UserOutlined,
   CloseOutlined, ExpandAltOutlined,
@@ -9,7 +9,7 @@ import {
   PaperClipOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, getSessionState, discardSession, deleteSession, renameSession, uploadChatFile } from '../api/chat';
+import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, getSessionState, discardSession, deleteSession, deleteAllSessions, renameSession, uploadChatFile } from '../api/chat';
 import useAuthStore from '../store/authStore';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 
@@ -201,6 +201,10 @@ function StateBadge({ state }) {
 }
 
 /* ─── Smart timestamp helpers ───────────────────────────────────────────────── */
+function fmtIso(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 function _dayOf(ts) {
   const d = new Date(ts);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -277,7 +281,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.results?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.results.map((r, i) => (
           <div key={i} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px' }}>
@@ -313,24 +317,21 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.cycles?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {data.cycles.slice(0, 3).map((c, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {data.cycles.map((c, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', flex: 1 }}>{c.name}</span>
             <StateBadge state={c.state} />
           </div>
         ))}
-        {data.cycles.length > 3 && (
-          <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>+{data.cycles.length - 3} more</div>
-        )}
       </div>
     );
   }
 
   if (data.deadlines?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {data.deadlines.slice(0, 3).map((d, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {data.deadlines.map((d, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{d.cycle}</div>
             <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2, fontWeight: 500 }}>⏰ {d.deadline}</div>
@@ -343,20 +344,19 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   if (data.grouped_tasks?.length) {
     const STATUS_COLOR = { SUBMITTED: '#22c55e', IN_PROGRESS: '#3b82f6', PENDING: '#f59e0b', CREATED: '#94a3b8' };
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.grouped_tasks.map((g, gi) => (
           <div key={gi} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>{g.cycle}</span>
               <StateBadge state={g.state} />
             </div>
-            {g.tasks.slice(0, 4).map((t, ti) => (
+            {g.tasks.map((t, ti) => (
               <div key={ti} style={{ padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: ti < g.tasks.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
                 <span style={{ fontSize: 11, color: '#334155' }}>{t.reviewee}</span>
                 <span style={{ fontSize: 10, fontWeight: 600, color: STATUS_COLOR[t.status] || '#64748b', background: `${STATUS_COLOR[t.status] || '#64748b'}15`, borderRadius: 20, padding: '1px 7px' }}>{t.status}</span>
               </div>
             ))}
-            {g.tasks.length > 4 && <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', padding: '3px 0' }}>+{g.tasks.length - 4} more</div>}
           </div>
         ))}
       </div>
@@ -374,19 +374,18 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
     });
     const groupedList = Object.values(grouped);
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {groupedList.map((g, gi) => (
           <div key={gi} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>{g.cycle}</span>
             </div>
-            {g.tasks.slice(0, 4).map((t, ti) => (
+            {g.tasks.map((t, ti) => (
               <div key={ti} style={{ padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: ti < g.tasks.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
                 <span style={{ fontSize: 11, color: '#334155' }}>{t.reviewee || t.name}</span>
                 <span style={{ fontSize: 10, fontWeight: 600, color: STATUS_COLOR[t.status] || '#64748b', background: `${STATUS_COLOR[t.status] || '#64748b'}15`, borderRadius: 20, padding: '1px 7px' }}>{t.status}</span>
               </div>
             ))}
-            {g.tasks.length > 4 && <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', padding: '3px 0' }}>+{g.tasks.length - 4} more</div>}
           </div>
         ))}
       </div>
@@ -395,7 +394,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.team?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.team.map((m, i) => {
           const pct = m.total_tasks > 0 ? Math.round((m.submitted / m.total_tasks) * 100) : 0;
           return (
@@ -416,8 +415,8 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.participation?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.participation.slice(0, 3).map((p, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.participation.map((p, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{p.cycle}</span>
@@ -434,7 +433,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.available_cycles?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {data.available_cycles.map((c, i) => (
           <div
             key={`${c.id}-${i}`}
@@ -454,7 +453,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.available_nominations?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {data.available_nominations.map((n, i) => (
           <div
             key={`${n.nomination_id}-${i}`}
@@ -479,19 +478,18 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   if (data.grouped_nominations?.length) {
     const NOM_COLORS = { PENDING: '#f59e0b', APPROVED: '#22c55e', REJECTED: '#ef4444' };
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.grouped_nominations.map((g, gi) => (
           <div key={gi} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>{g.cycle}</span>
             </div>
-            {g.nominations.slice(0, 4).map((n, ni) => (
+            {g.nominations.map((n, ni) => (
               <div key={ni} style={{ padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: ni < g.nominations.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
                 <span style={{ fontSize: 11, color: '#334155' }}>{n.peer}</span>
                 <span style={{ fontSize: 10, fontWeight: 600, background: `${NOM_COLORS[n.status] || '#94a3b8'}15`, color: NOM_COLORS[n.status] || '#94a3b8', borderRadius: 20, padding: '1px 7px' }}>{n.status}</span>
               </div>
             ))}
-            {g.nominations.length > 4 && <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', padding: '3px 0' }}>+{g.nominations.length - 4} more</div>}
           </div>
         ))}
       </div>
@@ -509,19 +507,18 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
     });
     const groupedList = Object.values(grouped);
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {groupedList.map((g, gi) => (
           <div key={gi} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>{g.cycle}</span>
             </div>
-            {g.nominations.slice(0, 4).map((n, ni) => (
+            {g.nominations.map((n, ni) => (
               <div key={ni} style={{ padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: ni < g.nominations.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
                 <span style={{ fontSize: 11, color: '#334155' }}>{n.peer}</span>
                 <span style={{ fontSize: 10, fontWeight: 600, background: `${NOM_COLORS[n.status] || '#94a3b8'}15`, color: NOM_COLORS[n.status] || '#94a3b8', borderRadius: 20, padding: '1px 7px' }}>{n.status}</span>
               </div>
             ))}
-            {g.nominations.length > 4 && <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', padding: '3px 0' }}>+{g.nominations.length - 4} more</div>}
           </div>
         ))}
       </div>
@@ -531,13 +528,13 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   if (data.grouped_team_nominations?.length) {
     const NOM_COLORS = { PENDING: '#f59e0b', APPROVED: '#22c55e', REJECTED: '#ef4444' };
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.grouped_team_nominations.map((g, gi) => (
           <div key={gi} style={{ ...card, overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '5px 10px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#1e293b' }}>{g.reviewee}</span>
             </div>
-            {g.nominations.slice(0, 4).map((n, ni) => (
+            {g.nominations.map((n, ni) => (
               <div key={ni} style={{ padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: ni < g.nominations.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
                 <div>
                   <div style={{ fontSize: 11, color: '#334155' }}>{n.peer}</div>
@@ -553,7 +550,6 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
                 )}
               </div>
             ))}
-            {g.nominations.length > 4 && <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', padding: '3px 0' }}>+{g.nominations.length - 4} more</div>}
           </div>
         ))}
       </div>
@@ -563,8 +559,8 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   if (data.team_nominations?.length) {
     const NOM_COLORS = { PENDING: '#f59e0b', APPROVED: '#22c55e', REJECTED: '#ef4444' };
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.team_nominations.slice(0, 3).map((n, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.team_nominations.map((n, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{n.reviewee}</div>
@@ -579,8 +575,8 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.templates?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.templates.slice(0, 3).map((t, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.templates.map((t, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{t.name}</span>
             <span style={{ fontSize: 10, background: '#eff6ff', color: '#1d4ed8', borderRadius: 20, padding: '1px 7px', fontWeight: 600 }}>{t.cycle_count} cycles</span>
@@ -592,29 +588,26 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.employees?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.employees.slice(0, 3).map((e, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.employees.map((e, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{e.name}</div>
             <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>{e.role?.replace('_', ' ')} · {e.department}</div>
           </div>
         ))}
-        {data.employees.length > 3 && (
-          <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>+{data.employees.length - 3} more</div>
-        )}
       </div>
     );
   }
 
   if (data.announcements?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.announcements.slice(0, 2).map((a, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.announcements.map((a, i) => (
           <div key={i} style={{
             background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8,
             padding: '6px 10px', fontSize: 11, color: '#1d4ed8', lineHeight: 1.5,
           }}>
-            {a.message.length > 80 ? `${a.message.slice(0, 80)}…` : a.message}
+            {a.message}
           </div>
         ))}
       </div>
@@ -623,14 +616,16 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
 
   if (data.audit_logs?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.audit_logs.slice(0, 3).map((l, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.audit_logs.map((l, i) => (
           <div key={i} style={{ ...card, padding: '5px 10px' }}>
             <div style={{ fontSize: 10, color: '#374151' }}>
               <span style={{ fontWeight: 600 }}>{l.actor}</span>
               {' · '}<span style={{ color: '#7c3aed' }}>{l.action}</span>
             </div>
-            <div style={{ fontSize: 9, color: '#94a3b8', marginTop: 1 }}>{l.at}</div>
+            <div style={{ fontSize: 9, color: '#94a3b8', marginTop: 1 }}>
+              {l.at ? new Date(l.at).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+            </div>
           </div>
         ))}
       </div>
@@ -640,8 +635,8 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   // Pending approvals
   if (data.pending_approvals?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.pending_approvals.slice(0, 5).map((a, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.pending_approvals.map((a, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -652,9 +647,6 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
             </div>
           </div>
         ))}
-        {data.pending_approvals.length > 5 && (
-          <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>+{data.pending_approvals.length - 5} more</div>
-        )}
       </div>
     );
   }
@@ -662,8 +654,8 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   // Cycle results
   if (data.cycle_results?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {data.cycle_results.slice(0, 6).map((r, i) => (
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {data.cycle_results.map((r, i) => (
           <div key={i} style={{ ...card, padding: '6px 10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b', flex: 1 }}>{r.name}</div>
@@ -675,9 +667,6 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
             </div>
           </div>
         ))}
-        {data.cycle_results.length > 6 && (
-          <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>+{data.cycle_results.length - 6} more</div>
-        )}
       </div>
     );
   }
@@ -705,18 +694,15 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
           borderRadius: 7, padding: '5px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
         }}>⬇ Download CSV ({data.export_nominations.length} rows)</button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {data.export_nominations.slice(0, 4).map((n, i) => (
+          {data.export_nominations.map((n, i) => (
             <div key={i} style={{ ...card, padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>{n.reviewee} → {n.peer}</div>
-                <div style={{ fontSize: 9, color: '#94a3b8' }}>{n.nominated_on}</div>
+                <div style={{ fontSize: 9, color: '#94a3b8' }}>{fmtIso(n.nominated_on)}</div>
               </div>
               <span style={{ fontSize: 9, fontWeight: 600, background: `${NOM_COLORS[n.status] || '#94a3b8'}20`, color: NOM_COLORS[n.status] || '#94a3b8', borderRadius: 20, padding: '1px 6px' }}>{n.status}</span>
             </div>
           ))}
-          {data.export_nominations.length > 4 && (
-            <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center' }}>+{data.export_nominations.length - 4} more (in CSV)</div>
-          )}
         </div>
       </div>
     );
@@ -769,7 +755,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   // Direct reports (show my team)
   if (data.direct_reports?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.direct_reports.map((m, i) => (
           <div key={i} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -800,7 +786,7 @@ function MiniData({ data, onPick, onDirectAction, onNavigate }) {
   // Who has not submitted
   if (data.pending?.length) {
     return (
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.pending.map((p, i) => (
           <div key={i} style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -860,6 +846,68 @@ function ReportLink({ url, onNavigate }) {
     </button>
   );
 }
+
+/* ─── Editable confirmation card ────────────────────────────────────────────── */
+function ConfirmEditCard({ data, onEdit }) {
+  const SKIP_KEYS = new Set(['cycle_id', 'template_id', 'nomination_id']);
+  const FIELD_LABELS = {
+    name: 'Name', cycle_name: 'Cycle', template_name: 'Template',
+    nomination_summary: 'Nomination', description: 'Description',
+    quarter_year: 'Quarter', review_deadline: 'Review Deadline',
+    nomination_deadline: 'Nomination Deadline', nomination_approval: 'Approval Type',
+    peer_enabled: 'Peer Review', peer_count: 'Peer Count',
+    participant_emails: 'Participants', peer_emails: 'Peers',
+    peer_email: 'Peer Email', rejection_note: 'Rejection Reason',
+  };
+  const EDITABLE_SKIP = new Set(['cycle_name', 'template_name', 'nomination_summary', 'participant_emails']);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editVal, setEditVal] = useState('');
+
+  const entries = Object.entries(data).filter(([k]) => !SKIP_KEYS.has(k));
+
+  return (
+    <div style={{ fontSize: 10.5, background: 'rgba(255,255,255,0.8)', borderRadius: 8, overflow: 'hidden', marginTop: 4 }}>
+      {entries.map(([k, v]) => {
+        const label = FIELD_LABELS[k] || k.replace(/_/g, ' ');
+        const canEdit = !EDITABLE_SKIP.has(k);
+        const isEditing = editingKey === k;
+        return (
+          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: '1px solid rgba(255,255,255,0.5)' }}>
+            <span style={{ fontWeight: 700, color: '#1e40af', minWidth: 90, fontSize: 10 }}>{label}:</span>
+            {isEditing ? (
+              <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                <input
+                  autoFocus
+                  value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && editVal.trim()) { onEdit(k, editVal.trim()); setEditingKey(null); }
+                    if (e.key === 'Escape') setEditingKey(null);
+                  }}
+                  style={{ flex: 1, fontSize: 10.5, border: '1px solid #93c5fd', borderRadius: 4, padding: '2px 6px', outline: 'none' }}
+                />
+                <button onClick={() => { if (editVal.trim()) { onEdit(k, editVal.trim()); setEditingKey(null); } }}
+                  style={{ fontSize: 9, fontWeight: 700, background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}>✓</button>
+                <button onClick={() => setEditingKey(null)}
+                  style={{ fontSize: 9, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}>✗</button>
+              </div>
+            ) : (
+              <>
+                <span style={{ flex: 1, color: '#1e293b', fontSize: 10.5 }}>{String(v || '—')}</span>
+                {canEdit && (
+                  <button onClick={() => { setEditingKey(k); setEditVal(String(v || '')); }}
+                    style={{ fontSize: 9, color: '#60a5fa', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', opacity: 0.7, flexShrink: 0 }}
+                    title={`Edit ${label}`}>✏</button>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 /* ─── Widget bubble ─────────────────────────────────────────────────────────── */
 function WidgetBubble({ msg, onSuggest, onDirectAction, onNavigate, role }) {
@@ -942,6 +990,33 @@ function WidgetBubble({ msg, onSuggest, onDirectAction, onNavigate, role }) {
                   }}
                 >
                   {s}
+                </button>
+              ))}
+            </div>
+          )}
+          {isNeedsInput && msg.field_options?.length > 0 && (
+            <div style={{ marginTop: 9, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {msg.field_options.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => onSuggest?.(opt)}
+                  style={{
+                    background: opt === 'skip' ? '#f8fafc' : '#eef2ff',
+                    border: `1px solid ${opt === 'skip' ? '#e2e8f0' : '#c7d2fe'}`,
+                    borderRadius: 20, padding: '4px 12px', cursor: 'pointer',
+                    fontSize: 11, color: opt === 'skip' ? '#94a3b8' : '#4f46e5',
+                    fontWeight: 600, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = opt === 'skip' ? '#f1f5f9' : '#e0e7ff';
+                    e.currentTarget.style.borderColor = opt === 'skip' ? '#cbd5e1' : '#a5b4fc';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = opt === 'skip' ? '#f8fafc' : '#eef2ff';
+                    e.currentTarget.style.borderColor = opt === 'skip' ? '#e2e8f0' : '#c7d2fe';
+                  }}
+                >
+                  {opt}
                 </button>
               ))}
             </div>
@@ -1048,8 +1123,82 @@ const QUICK_BY_ROLE = {
 };
 const QUICK_DEFAULT = ['Show my tasks', 'Show cycle status', 'Show announcements'];
 
+/* ─── Command Palette items per role ────────────────────────────────────────── */
+const COMMAND_PALETTE_ITEMS = {
+  EMPLOYEE: [
+    { icon: '✅', cmd: 'show my tasks',          label: 'Show my tasks' },
+    { icon: '📊', cmd: 'show my report',          label: 'Show my report' },
+    { icon: '💬', cmd: 'show my feedback',        label: 'Show my feedback' },
+    { icon: '🤝', cmd: 'show my nominations',     label: 'Show my nominations' },
+    { icon: '👥', cmd: 'nominate peers',           label: 'Nominate peers' },
+    { icon: '↩', cmd: 'retract nomination',        label: 'Retract a nomination' },
+    { icon: '🔄', cmd: 'show cycles I am in',     label: 'Show cycles I am in' },
+    { icon: '📅', cmd: 'show upcoming deadlines', label: 'Show upcoming deadlines' },
+    { icon: '📢', cmd: 'show announcements',       label: 'Show announcements' },
+    { icon: '👤', cmd: 'show my profile',          label: 'Show my profile' },
+    { icon: '👔', cmd: 'show my manager',          label: 'Show my manager' },
+  ],
+  MANAGER: [
+    { icon: '✅', cmd: 'show my tasks',            label: 'Show my tasks' },
+    { icon: '💬', cmd: 'show my feedback',         label: 'Show my feedback' },
+    { icon: '🤝', cmd: 'show my nominations',      label: 'Show my nominations' },
+    { icon: '👥', cmd: 'nominate peers',            label: 'Nominate peers' },
+    { icon: '↩', cmd: 'retract nomination',         label: 'Retract a nomination' },
+    { icon: '🔄', cmd: 'show cycles I am in',      label: 'Show cycles I am in' },
+    { icon: '📅', cmd: 'show upcoming deadlines',  label: 'Show upcoming deadlines' },
+    { icon: '👥', cmd: 'show team summary',         label: 'Show team summary' },
+    { icon: '📋', cmd: 'show team nominations',    label: 'Show team nominations' },
+    { icon: '⏳', cmd: 'show pending reviews',     label: 'Show pending reviews' },
+    { icon: '✔️', cmd: 'show pending approvals',  label: 'Show pending approvals' },
+    { icon: '📊', cmd: 'show cycle results',       label: 'Show cycle results' },
+    { icon: '🔔', cmd: 'remind team',              label: 'Remind team' },
+    { icon: '⬇', cmd: 'export nominations',        label: 'Export nominations' },
+    { icon: '📢', cmd: 'show announcements',        label: 'Show announcements' },
+  ],
+  HR_ADMIN: [
+    { icon: '📊', cmd: 'show cycle status',        label: 'Show cycle status' },
+    { icon: '📈', cmd: 'show participation stats', label: 'Show participation stats' },
+    { icon: '📝', cmd: 'show all templates',       label: 'Show all templates' },
+    { icon: '👤', cmd: 'show all employees',       label: 'Show all employees' },
+    { icon: '📅', cmd: 'show cycle deadlines',     label: 'Show cycle deadlines' },
+    { icon: '➕', cmd: 'create a cycle',            label: 'Create a cycle' },
+    { icon: '➕', cmd: 'create a template',         label: 'Create a template' },
+    { icon: '▶️', cmd: 'activate a cycle',         label: 'Activate a cycle' },
+    { icon: '🔒', cmd: 'finalize a cycle',          label: 'Finalize a cycle' },
+    { icon: '⏹️', cmd: 'close a cycle',            label: 'Close a cycle' },
+    { icon: '🚀', cmd: 'release results',           label: 'Release results' },
+    { icon: '❌', cmd: 'cancel a cycle',            label: 'Cancel a cycle' },
+    { icon: '✔️', cmd: 'show pending approvals',   label: 'Show pending approvals' },
+    { icon: '📊', cmd: 'show cycle results',        label: 'Show cycle results' },
+    { icon: '⬇', cmd: 'export nominations',         label: 'Export nominations' },
+    { icon: '📢', cmd: 'show announcements',         label: 'Show announcements' },
+  ],
+  SUPER_ADMIN: [
+    { icon: '📊', cmd: 'show cycle status',         label: 'Show cycle status' },
+    { icon: '📈', cmd: 'show participation stats',  label: 'Show participation stats' },
+    { icon: '📝', cmd: 'show all templates',        label: 'Show all templates' },
+    { icon: '👤', cmd: 'show all employees',        label: 'Show all employees' },
+    { icon: '📅', cmd: 'show cycle deadlines',      label: 'Show cycle deadlines' },
+    { icon: '➕', cmd: 'create a cycle',             label: 'Create a cycle' },
+    { icon: '➕', cmd: 'create a template',          label: 'Create a template' },
+    { icon: '▶️', cmd: 'activate a cycle',          label: 'Activate a cycle' },
+    { icon: '🔒', cmd: 'finalize a cycle',           label: 'Finalize a cycle' },
+    { icon: '⏹️', cmd: 'close a cycle',             label: 'Close a cycle' },
+    { icon: '🚀', cmd: 'release results',            label: 'Release results' },
+    { icon: '❌', cmd: 'cancel a cycle',             label: 'Cancel a cycle' },
+    { icon: '🔍', cmd: 'show audit logs',            label: 'Show audit logs' },
+    { icon: '👥', cmd: 'show team summary',          label: 'Show team summary' },
+    { icon: '📋', cmd: 'show team nominations',     label: 'Show team nominations' },
+    { icon: '✔️', cmd: 'show pending approvals',    label: 'Show pending approvals' },
+    { icon: '📊', cmd: 'show cycle results',         label: 'Show cycle results' },
+    { icon: '⬇', cmd: 'export nominations',          label: 'Export nominations' },
+    { icon: '🔔', cmd: 'remind team',               label: 'Remind team' },
+    { icon: '📢', cmd: 'show announcements',          label: 'Show announcements' },
+  ],
+};
+
 /* ─── History Panel ─────────────────────────────────────────────────────────── */
-function HistoryPanel({ sessions, loading, onSelectSession, onClose, onDeleteSession, onRenameSession }) {
+function HistoryPanel({ sessions, loading, onSelectSession, onClose, onDeleteSession, onRenameSession, onDeleteAll }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredId, setHoveredId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -1106,7 +1255,21 @@ function HistoryPanel({ sessions, loading, onSelectSession, onClose, onDeleteSes
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', color: '#64748b' }}>
           <ArrowLeftOutlined style={{ fontSize: 14 }} />
         </button>
-        <span style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>Conversation History</span>
+        <span style={{ fontWeight: 700, fontSize: 13, color: '#1e293b', flex: 1 }}>Conversation History</span>
+        {sessions.length > 0 && (
+          <Popconfirm
+            title="Delete all chats?"
+            description="This will permanently remove all your chat history."
+            okText="Delete All"
+            okButtonProps={{ danger: true }}
+            cancelText="Cancel"
+            onConfirm={onDeleteAll}
+          >
+            <button style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', padding: '2px 8px', fontSize: 11, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <DeleteOutlined style={{ fontSize: 11 }} /> Clear All
+            </button>
+          </Popconfirm>
+        )}
       </div>
 
       {/* Search */}
@@ -1220,6 +1383,86 @@ function HistoryPanel({ sessions, loading, onSelectSession, onClose, onDeleteSes
   );
 }
 
+/* ─── Command Palette ───────────────────────────────────────────────────────── */
+function CommandPalette({ role, onSelect, onClose }) {
+  const [query, setQuery] = useState('');
+  const searchRef = useRef(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const items = COMMAND_PALETTE_ITEMS[role] || COMMAND_PALETTE_ITEMS.EMPLOYEE;
+  const filtered = query
+    ? items.filter(it => it.label.toLowerCase().includes(query.toLowerCase()))
+    : items;
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
+  useEffect(() => { setActiveIdx(0); }, [query]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 200,
+        background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(3px)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        paddingTop: 60,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        width: '92%', background: '#fff', borderRadius: 14,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        maxHeight: '70%',
+      }}>
+        {/* Search input */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderBottom: '1px solid #f1f5f9' }}>
+          <span style={{ fontSize: 14, color: '#94a3b8' }}>⌘</span>
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { onClose(); return; }
+              if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, filtered.length - 1)); }
+              if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+              if (e.key === 'Enter' && filtered[activeIdx]) { onSelect(filtered[activeIdx].cmd); }
+            }}
+            placeholder="Search commands…"
+            style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13.5, color: '#1e293b', background: 'transparent', fontFamily: 'inherit' }}
+          />
+          <span style={{ fontSize: 10, color: '#94a3b8', background: '#f1f5f9', borderRadius: 4, padding: '2px 6px', whiteSpace: 'nowrap' }}>Esc to close</span>
+        </div>
+        {/* Results */}
+        <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '20px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>No commands found</div>
+          ) : filtered.map((it, i) => (
+            <div
+              key={i}
+              onClick={() => onSelect(it.cmd)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 16px', cursor: 'pointer',
+                background: i === activeIdx ? '#f5f3ff' : 'transparent',
+                borderBottom: i < filtered.length - 1 ? '1px solid #f8fafc' : 'none',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={() => setActiveIdx(i)}
+            >
+              <span style={{ fontSize: 15, width: 24, textAlign: 'center', flexShrink: 0 }}>{it.icon}</span>
+              <span style={{ fontSize: 13, color: '#1e293b', fontWeight: 500 }}>{it.label}</span>
+            </div>
+          ))}
+        </div>
+        {/* Footer hint */}
+        <div style={{ padding: '7px 16px', background: '#fafbfc', borderTop: '1px solid #f1f5f9', fontSize: 10, color: '#94a3b8', display: 'flex', gap: 14 }}>
+          <span>↑↓ navigate</span>
+          <span>↵ select</span>
+          <span>Ctrl+/ toggle</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── getSuggestions helper ─────────────────────────────────────────────────── */
 function getSuggestions(data) {
   if (!data) return ['Show announcements', 'Show my tasks'];
@@ -1250,8 +1493,12 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
   const [sessionsLoading,   setSessionsLoading]   = useState(false);
   const [confirmNewChat,    setConfirmNewChat]    = useState(false);
   const [isOnline,          setIsOnline]          = useState(navigator.onLine);
+  const [waitingField,      setWaitingField]      = useState(null); // current slot being filled
+  const [showPalette,       setShowPalette]       = useState(false);
   const bottomRef  = useRef(null);
-  const inputRef   = useRef(null);
+  const inputRef      = useRef(null);
+  const inputHistory  = useRef([]);   // sent messages, newest first
+  const historyIdx    = useRef(-1);   // -1 = not browsing history
   const navigate   = useNavigate();
   const retryCountRef  = useRef(0);
   const bcRef          = useRef(null);   // BroadcastChannel for cross-tab sync
@@ -1353,6 +1600,19 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     };
   }, []);
 
+  // Ctrl+/ toggles command palette
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open]);
+
   const _logsToMessages = (logs, reversed = false) => {
     const history = reversed ? [...logs].reverse() : logs;
     const pairs = [];
@@ -1372,15 +1632,72 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     return pairs;
   };
 
+  // Proactive greeting — sent silently when widget opens fresh (no messages)
+  const _sendGreeting = async () => {
+    setLoading(true);
+    setStreaming(false);
+    try {
+      await sendMessageStream(
+        '__startup__',
+        '',
+        null,
+        (chunk) => {
+          setStreaming((was) => {
+            if (!was) {
+              setMessages((prev) => [...prev, { role: 'assistant', text: chunk, status: 'streaming', data: {}, ts: new Date().toISOString() }]);
+            } else {
+              setMessages((prev) => {
+                const upd = [...prev];
+                const last = upd[upd.length - 1];
+                if (last?.role === 'assistant') upd[upd.length - 1] = { ...last, text: last.text + chunk };
+                return upd;
+              });
+            }
+            return true;
+          });
+        },
+        (data) => {
+          if (data.session_id) {
+            setSessionId(data.session_id);
+            localStorage.setItem('chat_session_id', data.session_id);
+          }
+          setStreaming((was) => {
+            const finalMsg = { role: 'assistant', text: data.message, status: data.status || 'success', data: data.data || {}, ts: new Date().toISOString() };
+            if (was) {
+              setMessages((prev) => {
+                const upd = [...prev];
+                const last = upd[upd.length - 1];
+                if (last?.role === 'assistant') upd[upd.length - 1] = finalMsg;
+                return upd;
+              });
+            } else {
+              setMessages((prev) => [...prev, finalMsg]);
+            }
+            return false;
+          });
+        },
+      );
+    } catch { /* greeting failure should not break the UI */ }
+    finally {
+      setLoading(false);
+      setStreaming(false);
+    }
+  };
+
   const loadHistory = async () => {
     try {
       const [histRes, sessRes] = await Promise.all([getChatHistory(), getSessionState()]);
-      setMessages(_logsToMessages(histRes.data.history || [], true));
+      const msgs = _logsToMessages(histRes.data.history || [], true);
+      setMessages(msgs);
       if (sessRes.data.has_active_session) {
         setRecoveryBanner({
           intent_label:     sessRes.data.intent_label,
           awaiting_confirm: sessRes.data.awaiting_confirm,
         });
+      }
+      // Send personalized greeting only on truly fresh start
+      if (msgs.length === 0 && !sessRes.data.has_active_session) {
+        _sendGreeting();
       }
     } catch { /* silent */ }
   };
@@ -1399,6 +1716,16 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     try {
       await deleteSession(sessionId);
       setSessions((prev) => prev.filter(s => s.session_id !== sessionId));
+    } catch { /* silent */ }
+  };
+
+  const handleDeleteAll = async () => {
+    try {
+      await deleteAllSessions();
+      setSessions([]);
+      setMessages([]);
+      setSessionId(null);
+      setShowHistory(false);
     } catch { /* silent */ }
   };
 
@@ -1431,7 +1758,10 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     setShowHistory(false);
     setAwaitConfirm(false);
     setPendingConfirmData(null);
+    setWaitingField(null);
     try { await discardSession(); } catch { /* silent */ }
+    // Show greeting in the fresh session
+    _sendGreeting();
   };
 
   const handleNewChat = () => {
@@ -1454,7 +1784,12 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     const label  = displayOverride || (isPick ? text.label : msg);
     if (!msg || loading) return;
     setInput('');
-    setRecoveryBanner(null); // hide banner once user engages
+    setWaitingField(null);
+    setRecoveryBanner(null);
+    if (msg && typeof msg === 'string' && msg.length > 0) {
+      inputHistory.current = [msg, ...inputHistory.current.filter(m => m !== msg)].slice(0, 50);
+    }
+    historyIdx.current = -1;
     if (!displayOverride) addMessage('user', label);
     setLoading(true);
     setStreaming(false);
@@ -1499,6 +1834,7 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
             setAwaitConfirm(isConfirmPending);
             if (isConfirmPending) setPendingConfirmData(data.data || null);
             else setPendingConfirmData(null);
+            setWaitingField(data.status === 'needs_input' ? (data.missing_field || null) : null);
 
             setStreaming((wasStreaming) => {
               if (wasStreaming) {
@@ -1707,6 +2043,16 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
                   <InfoCircleOutlined style={{ color: '#fff', fontSize: 14 }} />
                 </button>
               </Tooltip>
+              <Tooltip title="Command palette (Ctrl+/)">
+                <button onClick={() => setShowPalette((v) => !v)} style={{
+                  background: showPalette ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)',
+                  border: 'none', cursor: 'pointer',
+                  width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s',
+                }}>
+                  <span style={{ color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '-0.5px' }}>/</span>
+                </button>
+              </Tooltip>
               <Tooltip title="Open full page">
                 <button onClick={() => { onClose(); navigate('/chat'); }} style={{
                   background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer',
@@ -1763,6 +2109,7 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
               onClose={() => setShowHistory(false)}
               onDeleteSession={handleDeleteSession}
               onRenameSession={handleRenameSession}
+              onDeleteAll={handleDeleteAll}
             />
           )}
 
@@ -1852,14 +2199,14 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
                 </Button>
               </div>
               {pendingConfirmData && Object.keys(pendingConfirmData).length > 0 && (
-                <div style={{ fontSize: 10.5, color: '#1e40af', background: 'rgba(255,255,255,0.7)', borderRadius: 6, padding: '5px 8px', lineHeight: 1.6 }}>
-                  {Object.entries(pendingConfirmData)
-                    .filter(([k]) => k !== 'cycle_id')
-                    .map(([k, v]) => (
-                      <div key={k}><b>{k.replace(/_/g, ' ')}:</b> {String(v)}</div>
-                    ))
-                  }
-                </div>
+                <ConfirmEditCard
+                  data={pendingConfirmData}
+                  onEdit={(field, value) => {
+                    setAwaitConfirm(false);
+                    setInput(`change ${field.replace(/_/g, ' ')} to ${value}`);
+                    setTimeout(() => { setAwaitConfirm(true); handleSend(`change ${field.replace(/_/g, ' ')} to ${value}`); }, 50);
+                  }}
+                />
               )}
             </div>
           )}
@@ -1945,6 +2292,40 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
             </div>
           )}
 
+          {/* Waiting-for hint — shown while bot is collecting a slot */}
+          {waitingField && !awaitConfirm && !showHistory && (() => {
+            const FIELD_LABELS = {
+              name: 'cycle name', description: 'description (or skip)',
+              quarter_year: 'quarter & year', review_deadline: 'review deadline (YYYY-MM-DD)',
+              nomination_deadline: 'nomination deadline (YYYY-MM-DD or skip)',
+              nomination_approval: 'approval type', peer_enabled: 'peer review (yes/no)',
+              peer_count: 'peer count (e.g. 2 to 4)', participant_emails: 'participants',
+              peer_emails: 'peer emails', peer_email: 'peer email',
+              rejection_note: 'rejection reason', content: 'template content',
+              department: 'department',
+            };
+            return (
+              <div style={{ margin: '0 14px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: '#92400e', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 20, padding: '2px 10px', fontWeight: 600 }}>
+                  Waiting for: {FIELD_LABELS[waitingField] || waitingField.replace(/_/g, ' ')}
+                </span>
+              </div>
+            );
+          })()}
+
+          {/* Command Palette overlay */}
+          {showPalette && (
+            <CommandPalette
+              role={user?.role}
+              onSelect={(cmd) => {
+                setShowPalette(false);
+                setInput(cmd);
+                setTimeout(() => inputRef.current?.focus(), 50);
+              }}
+              onClose={() => setShowPalette(false)}
+            />
+          )}
+
           {/* Input — hidden when history or info panel is showing */}
           <div style={{ padding: '10px 14px 14px', borderTop: messages.length > 0 && !loading && !awaitConfirm && !showInfo && !showHistory ? 'none' : '1px solid #f1f5f9', background: '#fff', flexShrink: 0, display: showHistory ? 'none' : undefined }}>
             <div style={{
@@ -1960,9 +2341,23 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
               <Input
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); historyIdx.current = -1; }}
                 onPressEnter={() => !awaitConfirm && handleSend()}
-                placeholder={awaitConfirm ? 'Confirm or cancel the action above…' : voiceListening ? 'Listening…' : 'Ask anything…'}
+                onKeyDown={(e) => {
+                  const hist = inputHistory.current;
+                  if (e.key === 'ArrowUp' && hist.length > 0 && !awaitConfirm) {
+                    e.preventDefault();
+                    const idx = Math.min(historyIdx.current + 1, hist.length - 1);
+                    historyIdx.current = idx;
+                    setInput(hist[idx]);
+                  } else if (e.key === 'ArrowDown' && !awaitConfirm) {
+                    e.preventDefault();
+                    const idx = historyIdx.current - 1;
+                    historyIdx.current = Math.max(idx, -1);
+                    setInput(idx < 0 ? '' : hist[idx]);
+                  }
+                }}
+                placeholder={awaitConfirm ? 'Confirm or cancel the action above…' : voiceListening ? 'Listening…' : 'Ask anything… (Ctrl+/ for commands)'}
                 disabled={loading || awaitConfirm}
                 bordered={false}
                 style={{ fontSize: 13.5, background: 'transparent', flex: 1, padding: 0, color: awaitConfirm ? '#94a3b8' : undefined }}
