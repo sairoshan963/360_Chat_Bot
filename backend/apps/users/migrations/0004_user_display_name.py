@@ -8,9 +8,17 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='user',
-            name='display_name',
-            field=models.CharField(blank=True, max_length=100, null=True),
+        # display_name is already added by 0003_add_display_name_suspended_status in the
+        # parallel branch. Use SeparateDatabaseAndState so the migration state is updated
+        # without running the SQL again (which would fail with "column already exists").
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.AddField(
+                    model_name='user',
+                    name='display_name',
+                    field=models.CharField(blank=True, max_length=100, null=True),
+                ),
+            ],
         ),
     ]
