@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { Form, Input, Alert, Spin } from 'antd';
 import { MailOutlined, LockOutlined, LoadingOutlined, ArrowLeftOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import useAuthStore from '../../store/authStore';
@@ -33,15 +33,15 @@ export default function LoginPage() {
   const [devRevealed,  setDevRevealed] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [rippleKey,    setRippleKey]   = useState(0);
-  const navigate       = useNavigate();
-  const [searchParams] = useSearchParams();
+  const navigate  = useNavigate();
+  const location  = useLocation();
   const { token, setAuth } = useAuthStore();
 
   useEffect(() => {
-    const urlError = searchParams.get('error');
-    if (urlError) setError(decodeURIComponent(urlError));
-    const msg = searchParams.get('message');
-    if (msg === 'password_reset') setInfo('Your password has been reset. You may now log in.');
+    const stateError = location.state?.error;
+    if (stateError) setError(stateError);
+    const stateMsg = location.state?.message;
+    if (stateMsg === 'password_reset') setInfo('Your password has been reset. You may now log in.');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 

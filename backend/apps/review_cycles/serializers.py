@@ -71,6 +71,9 @@ class ReviewCycleSerializer(serializers.ModelSerializer):
         return None
 
     def get_participant_count(self, obj):
+        # Use pre-annotated value from list_cycles queryset when available (avoids N+1)
+        if hasattr(obj, 'participant_count'):
+            return obj.participant_count
         return obj.participations.count()
 
 

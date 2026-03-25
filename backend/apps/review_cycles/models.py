@@ -87,7 +87,7 @@ class ReviewCycle(models.Model):
     name                    = models.CharField(max_length=255)
     description             = models.TextField(blank=True, null=True)
     template                = models.ForeignKey(Template, on_delete=models.PROTECT, related_name='cycles')
-    state                   = models.CharField(max_length=20, choices=STATE_CHOICES, default='DRAFT')
+    state                   = models.CharField(max_length=20, choices=STATE_CHOICES, default='DRAFT', db_index=True)
 
     # Peer settings
     peer_enabled            = models.BooleanField(default=False)
@@ -101,8 +101,8 @@ class ReviewCycle(models.Model):
     self_anonymity          = models.CharField(max_length=20, choices=ANONYMITY_CHOICES, default='TRANSPARENT')
 
     # Deadlines
-    nomination_deadline     = models.DateTimeField(null=True, blank=True)
-    review_deadline         = models.DateTimeField()
+    nomination_deadline     = models.DateTimeField(null=True, blank=True, db_index=True)
+    review_deadline         = models.DateTimeField(db_index=True)
 
     # Quarter metadata
     quarter                 = models.CharField(max_length=2, choices=QUARTER_CHOICES, null=True, blank=True)

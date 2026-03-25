@@ -77,8 +77,8 @@ export default function UsersPage() {
   };
 
   const handleDelete = async (id) => {
-    try { await deleteUser(id); message.success('User deactivated'); load(); loadAll(); }
-    catch { message.error('Failed to deactivate'); }
+    try { await deleteUser(id); message.success('User deleted'); load(); loadAll(); }
+    catch (err) { message.error(err.response?.data?.error || 'Failed to delete user'); }
   };
 
   const handleResetPassword = async (u) => {
@@ -120,8 +120,8 @@ export default function UsersPage() {
           >
             <Button size="small" icon={<KeyOutlined />} disabled={r.status !== 'ACTIVE'} title="Reset Password" />
           </Popconfirm>
-          <Popconfirm title="Deactivate this user?" onConfirm={() => handleDelete(r.id)} disabled={r.status === 'INACTIVE'}>
-            <Button size="small" danger icon={<DeleteOutlined />} disabled={r.status === 'INACTIVE'} />
+          <Popconfirm title="Delete this user?" description="This will permanently delete the user and all their data." onConfirm={() => handleDelete(r.id)} okText="Delete" okType="danger">
+            <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),

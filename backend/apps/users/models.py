@@ -47,15 +47,15 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('SUSPENDED',  'Suspended'),
     ]
 
-    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email        = models.EmailField(unique=True)
-    first_name   = models.CharField(max_length=100, blank=True)
-    middle_name  = models.CharField(max_length=100, blank=True, null=True)
-    last_name    = models.CharField(max_length=100, blank=True)
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email       = models.EmailField(unique=True)
+    first_name  = models.CharField(max_length=100, blank=True)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    last_name   = models.CharField(max_length=100, blank=True)
+    job_title   = models.CharField(max_length=150, blank=True, null=True)
+    role        = models.CharField(max_length=20, choices=ROLE_CHOICES, default='EMPLOYEE')
+    status      = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ACTIVE')
     display_name = models.CharField(max_length=100, blank=True, null=True)
-    job_title    = models.CharField(max_length=150, blank=True, null=True)
-    role         = models.CharField(max_length=20, choices=ROLE_CHOICES, default='EMPLOYEE')
-    status       = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ACTIVE')
     avatar_url  = models.URLField(blank=True, null=True)
     department  = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL, related_name='members')
     is_staff    = models.BooleanField(default=False)
@@ -79,8 +79,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         return ' '.join(p for p in parts if p).strip() or self.email
 
     def get_display_name(self):
-        """Returns display_name if set, otherwise falls back to full name."""
-        return self.display_name or self.get_full_name()
+        return self.display_name.strip() if self.display_name and self.display_name.strip() else self.get_full_name()
 
 
 class OrgHierarchy(models.Model):

@@ -30,16 +30,42 @@ def submit_feedback(task_id, user, answers):
     if not answers:
         raise ValidationError('answers array is required')
 
-    # Validate required questions are answered
-    required_q_ids = set(
-        str(q.id) for q in TemplateQuestion.objects.filter(
-            section__template=task.cycle.template, is_required=True
+    # Load all questions for this template (used for required + scale validation)
+    all_questions = {
+        str(q.id): q for q in TemplateQuestion.objects.filter(
+            section__template=task.cycle.template
         )
-    )
+    }
+
+    # Validate required questions are answered
+    required_q_ids = {qid for qid, q in all_questions.items() if q.is_required}
     answered_q_ids = {str(a['question_id']) for a in answers}
     missing = required_q_ids - answered_q_ids
     if missing:
         raise ValidationError(f'Missing required answers for {len(missing)} question(s)')
+
+    # Validate answers are for questions that belong to this template
+    unknown = answered_q_ids - set(all_questions.keys())
+    if unknown:
+        raise ValidationError(f'Answer contains unknown question IDs')
+
+    # Validate rating values are within each question's defined scale
+    scale_errors = []
+    for a in answers:
+        qid = str(a['question_id'])
+        q = all_questions.get(qid)
+        if q and q.type == 'RATING' and a.get('rating_value') is not None:
+            rv = float(a['rating_value'])
+            if q.rating_scale_min is not None and rv < q.rating_scale_min:
+                scale_errors.append(
+                    f'Rating {rv} is below minimum {q.rating_scale_min} for question "{q.question_text[:50]}"'
+                )
+            if q.rating_scale_max is not None and rv > q.rating_scale_max:
+                scale_errors.append(
+                    f'Rating {rv} exceeds maximum {q.rating_scale_max} for question "{q.question_text[:50]}"'
+                )
+    if scale_errors:
+        raise ValidationError(scale_errors)
 
     with transaction.atomic():
         # Remove any existing response (re-submission guard)
@@ -79,37 +105,40 @@ def aggregate_cycle(cycle):
     """
     Calculate overall / self / manager / peer scores for every participant.
     Idempotent — safe to run multiple times (uses update_or_create).
+    Uses a single aggregation query per reviewee instead of N+1 per reviewer_type.
     """
+    from django.db.models import Avg, Q
+
     participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
 
     for participant in participants:
         reviewee = participant.user
 
-        def avg_score(reviewer_type):
-            tasks = ReviewerTask.objects.filter(
-                cycle=cycle, reviewee=reviewee,
-                reviewer_type=reviewer_type, status='SUBMITTED'
+        # One query: get all averages for this reviewee broken down by reviewer_type
+        scores = (
+            FeedbackAnswer.objects
+            .filter(
+                response__task__cycle=cycle,
+                response__task__reviewee=reviewee,
+                response__task__status='SUBMITTED',
+                rating_value__isnull=False,
             )
-            responses = FeedbackResponse.objects.filter(task__in=tasks)
-            result = FeedbackAnswer.objects.filter(
-                response__in=responses, rating_value__isnull=False
-            ).aggregate(avg=Avg('rating_value'))
-            return result['avg']
-
-        all_tasks     = ReviewerTask.objects.filter(cycle=cycle, reviewee=reviewee, status='SUBMITTED')
-        all_responses = FeedbackResponse.objects.filter(task__in=all_tasks)
-        overall_avg   = FeedbackAnswer.objects.filter(
-            response__in=all_responses, rating_value__isnull=False
-        ).aggregate(avg=Avg('rating_value'))['avg']
+            .aggregate(
+                overall=Avg('rating_value'),
+                self_score=Avg('rating_value', filter=Q(response__task__reviewer_type='SELF')),
+                manager_score=Avg('rating_value', filter=Q(response__task__reviewer_type='MANAGER')),
+                peer_score=Avg('rating_value', filter=Q(response__task__reviewer_type='PEER')),
+            )
+        )
 
         AggregatedResult.objects.update_or_create(
             cycle=cycle,
             reviewee=reviewee,
             defaults={
-                'overall_score': overall_avg,
-                'self_score':    avg_score('SELF'),
-                'manager_score': avg_score('MANAGER'),
-                'peer_score':    avg_score('PEER'),
+                'overall_score': scores['overall'],
+                'self_score':    scores['self_score'],
+                'manager_score': scores['manager_score'],
+                'peer_score':    scores['peer_score'],
             }
         )
 
@@ -133,10 +162,14 @@ def _get_feedback_sections(cycle, reviewee, viewer_role, viewer):
 
         answers = FeedbackAnswer.objects.filter(response=response).select_related('question')
 
-        # Determine identity visibility based on anonymity mode
+        # Determine identity visibility based on anonymity mode:
+        # TRANSPARENT  → everyone sees identity
+        # SEMI_ANONYMOUS → HR_ADMIN/MANAGER/SUPER_ADMIN see identity; employee does not
+        # ANONYMOUS    → only SUPER_ADMIN sees identity (preserves anonymity for all others)
         show_identity = (
             task.anonymity_mode == 'TRANSPARENT'
-            or viewer_role in ['SUPER_ADMIN', 'HR_ADMIN']
+            or viewer_role == 'SUPER_ADMIN'
+            or (task.anonymity_mode == 'SEMI_ANONYMOUS' and viewer_role in ['HR_ADMIN', 'MANAGER'])
             or task.reviewer == viewer
         )
 
@@ -189,10 +222,10 @@ def get_my_report(cycle_id, user):
         'cycle_id':      str(cycle_id),
         'cycle_name':    cycle.name,
         'reviewee':      {'id': str(user.id), 'name': user.get_full_name()},
-        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score else None,
-        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    else None,
-        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score else None,
-        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    else None,
+        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score is not None else None,
+        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    is not None else None,
+        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score is not None else None,
+        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    is not None else None,
         'sections':      sections,
     }
 
@@ -216,10 +249,8 @@ def get_employee_report(cycle_id, employee_id, viewer):
 
     # Manager scope check — can only view direct reports
     if viewer.role == 'MANAGER':
-        try:
-            if employee.manager_relation.manager != viewer:
-                raise PermissionDenied('Employee is not in your team')
-        except Exception:
+        from apps.users.models import OrgHierarchy
+        if not OrgHierarchy.objects.filter(employee=employee, manager=viewer).exists():
             raise PermissionDenied('Employee is not in your team')
 
     try:
@@ -241,10 +272,10 @@ def get_employee_report(cycle_id, employee_id, viewer):
         'cycle_id':      str(cycle_id),
         'cycle_name':    cycle.name,
         'reviewee':      {'id': str(employee.id), 'name': employee.get_full_name(), 'email': employee.email},
-        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score else None,
-        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    else None,
-        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score else None,
-        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    else None,
+        'overall_score': float(aggregated.overall_score) if aggregated and aggregated.overall_score is not None else None,
+        'self_score':    float(aggregated.self_score)    if aggregated and aggregated.self_score    is not None else None,
+        'manager_score': float(aggregated.manager_score) if aggregated and aggregated.manager_score is not None else None,
+        'peer_score':    float(aggregated.peer_score)    if aggregated and aggregated.peer_score    is not None else None,
         'sections':      sections,
     }
 
@@ -339,97 +370,114 @@ def export_employee_report_excel(cycle_id, employee_id, actor):
     return buffer
 
 
-# ─── Bulk Excel Export — All Reports for a Cycle ──────────────────────────────
+# ─── Bulk Excel Export (all employees in a cycle) ─────────────────────────────
 
 def export_all_reports_excel(cycle_id, actor):
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
     from io import BytesIO
 
-    from apps.users.models import User
-    from apps.review_cycles.models import ReviewCycle, CycleParticipant
-    from .models import AggregatedResult
+    try:
+        cycle = ReviewCycle.objects.get(id=cycle_id)
+    except ReviewCycle.DoesNotExist:
+        raise NotFound('Cycle not found')
 
-    cycle        = ReviewCycle.objects.get(id=cycle_id)
+    if cycle.state not in ['RESULTS_RELEASED', 'ARCHIVED']:
+        raise PermissionDenied('Results are not yet released')
+
     participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
-    employees    = [p.user for p in participants]
-
-    results_map = {
-        str(r.reviewee_id): r
-        for r in AggregatedResult.objects.filter(cycle=cycle, reviewee__in=employees)
-    }
 
     header_fill       = PatternFill('solid', fgColor='1677FF')
-    header_font_white = Font(bold=True, color='FFFFFF')
-    bold              = Font(bold=True)
+    header_font_white = Font(bold=True, color='FFFFFF', size=11)
+    section_font      = Font(bold=True, size=11)
+    center            = Alignment(horizontal='center')
 
     wb = openpyxl.Workbook()
 
-    # ── Summary sheet ────────────────────────────────────────────────────────
-    ws_summary = wb.active
-    ws_summary.title = 'Summary'
+    # ── Sheet 1: Summary ──────────────────────────────────────────────────────
+    ws_sum = wb.active
+    ws_sum.title = 'Summary'
 
-    summary_headers = ['Name', 'Email', 'Department', 'Overall', 'Self', 'Manager', 'Peer']
-    ws_summary.append(summary_headers)
-    for col_idx, _ in enumerate(summary_headers, 1):
-        cell = ws_summary.cell(row=1, column=col_idx)
-        cell.font  = header_font_white
-        cell.fill  = header_fill
-        cell.alignment = Alignment(horizontal='center')
+    summary_headers = ['Employee', 'Email', 'Department', 'Overall', 'Self', 'Manager', 'Peer']
+    ws_sum.append(summary_headers)
+    for col, _ in enumerate(summary_headers, 1):
+        cell = ws_sum.cell(row=1, column=col)
+        cell.font      = header_font_white
+        cell.fill      = header_fill
+        cell.alignment = center
 
-    for emp in employees:
-        r = results_map.get(str(emp.id))
-        ws_summary.append([
+    for p in participants:
+        emp = p.user
+        try:
+            agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
+            overall = round(float(agg.overall_score), 2) if agg.overall_score is not None else '—'
+            self_s  = round(float(agg.self_score),    2) if agg.self_score    is not None else '—'
+            mgr_s   = round(float(agg.manager_score), 2) if agg.manager_score is not None else '—'
+            peer_s  = round(float(agg.peer_score),    2) if agg.peer_score    is not None else '—'
+        except AggregatedResult.DoesNotExist:
+            overall = self_s = mgr_s = peer_s = '—'
+
+        ws_sum.append([
             emp.get_full_name(),
             emp.email,
-            emp.department.name if emp.department else '',
-            float(r.overall_score) if r and r.overall_score else '',
-            float(r.self_score)    if r and r.self_score    else '',
-            float(r.manager_score) if r and r.manager_score else '',
-            float(r.peer_score)    if r and r.peer_score    else '',
+            emp.department.name if emp.department else '—',
+            overall, self_s, mgr_s, peer_s,
         ])
 
-    for col in ['A','B','C','D','E','F','G']:
-        ws_summary.column_dimensions[col].width = 22
+    ws_sum.column_dimensions['A'].width = 25
+    ws_sum.column_dimensions['B'].width = 30
+    ws_sum.column_dimensions['C'].width = 20
+    for col in ['D', 'E', 'F', 'G']:
+        ws_sum.column_dimensions[col].width = 12
 
-    # ── Per-employee sheets ──────────────────────────────────────────────────
-    for emp in employees:
-        sheet_name = emp.get_full_name()[:28]  # Excel sheet name limit
+    # ── One sheet per employee ────────────────────────────────────────────────
+    for p in participants:
+        emp = p.user
+        sheet_name = emp.get_full_name()[:31]  # Excel sheet name limit
         ws = wb.create_sheet(title=sheet_name)
 
+        # Title block
         ws.append(['360° Feedback Report'])
-        ws['A1'].font = Font(bold=True, size=13)
+        ws['A1'].font = Font(bold=True, size=14)
         ws.append(['Cycle',     cycle.name])
         ws.append(['Employee',  emp.get_full_name()])
         ws.append(['Email',     emp.email])
+        ws.append(['Job Title', emp.job_title or '—'])
         ws.append([])
 
-        r = results_map.get(str(emp.id))
+        # Scores
         ws.append(['Score Summary'])
-        ws[f'A{ws.max_row}'].font = bold
-        ws.append([
-            'Overall', float(r.overall_score) if r and r.overall_score else '—',
-            'Self',    float(r.self_score)    if r and r.self_score    else '—',
-            'Manager', float(r.manager_score) if r and r.manager_score else '—',
-            'Peer',    float(r.peer_score)    if r and r.peer_score    else '—',
-        ])
+        ws.cell(row=ws.max_row, column=1).font = section_font
+        try:
+            agg = AggregatedResult.objects.get(cycle=cycle, reviewee=emp)
+            ws.append([
+                'Overall', round(float(agg.overall_score), 2) if agg.overall_score is not None else '—',
+                'Self',    round(float(agg.self_score),    2) if agg.self_score    is not None else '—',
+                'Manager', round(float(agg.manager_score), 2) if agg.manager_score is not None else '—',
+                'Peer',    round(float(agg.peer_score),    2) if agg.peer_score    is not None else '—',
+            ])
+        except AggregatedResult.DoesNotExist:
+            ws.append(['No aggregated scores available'])
         ws.append([])
 
+        # Detailed answers header
         header_row = ws.max_row + 1
         ws.append(['Reviewer Type', 'Reviewer', 'Question', 'Rating', 'Text Response'])
-        for col_idx in range(1, 6):
-            cell = ws.cell(row=header_row, column=col_idx)
-            cell.font  = header_font_white
-            cell.fill  = header_fill
-            cell.alignment = Alignment(horizontal='center')
+        for col in range(1, 6):
+            cell = ws.cell(row=header_row, column=col)
+            cell.font      = header_font_white
+            cell.fill      = header_fill
+            cell.alignment = center
 
+        # Answers (HR always sees identity)
         sections = _get_feedback_sections(cycle, emp, actor.role, actor)
         for section in sections:
             if section.get('hidden'):
                 reviewer_name = 'Anonymous'
             else:
                 identity = section.get('identity') or {}
-                reviewer_name = f"{identity.get('first_name','')} {identity.get('last_name','')}".strip() or 'Unknown'
+                reviewer_name = f"{identity.get('first_name', '')} {identity.get('last_name', '')}".strip() or 'Unknown'
+
             for ans in section.get('answers', []):
                 ws.append([
                     section['reviewer_type'],
@@ -449,11 +497,11 @@ def export_all_reports_excel(cycle_id, actor):
                  entity_id=cycle_id, new_value={
                      'exported_by': actor.get_full_name(),
                      'cycle': cycle.name,
-                     'type': 'bulk_all',
-                     'count': len(employees),
+                     'format': 'xlsx_bulk',
+                     'participant_count': participants.count(),
                  })
 
     buffer = BytesIO()
     wb.save(buffer)
     buffer.seek(0)
-    return buffer, cycle.name
+    return buffer

@@ -4,8 +4,17 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+
+
+class LoginRateThrottle(AnonRateThrottle):
+    scope = 'login'
+
+
+class PasswordResetRateThrottle(AnonRateThrottle):
+    scope = 'password_reset'
 
 from . import services
 from .serializers import (
@@ -23,6 +32,7 @@ from .serializers import (
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes   = [LoginRateThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -92,6 +102,12 @@ class GoogleAuthView(APIView):
             return Response({'success': False, 'error': 'Invalid Google token'}, status=400)
 
         profile = verify_resp.json()
+
+        # Verify the token was issued for our app (prevent token injection from other Google apps)
+        expected_aud = settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['client_id']
+        if profile.get('aud') != expected_aud:
+            return Response({'success': False, 'error': 'Invalid Google token'}, status=400)
+
         result = services.login_with_google(
             google_email=profile.get('email', ''),
             given_name=profile.get('given_name', ''),
@@ -123,6 +139,7 @@ class UpdateProfileView(APIView):
             serializer.validated_data['first_name'],
             serializer.validated_data.get('middle_name') or '',
             serializer.validated_data['last_name'],
+            serializer.validated_data.get('display_name') or '',
             serializer.validated_data.get('job_title', ''),
         )
         return Response({'success': True, 'user': UserMeSerializer(user).data})
@@ -141,6 +158,10 @@ class ChangePasswordView(APIView):
             serializer.validated_data['current_password'],
             serializer.validated_data['new_password'],
         )
+        from apps.audit.models import AuditLog
+        AuditLog.log(actor=request.user, action='CHANGE_PASSWORD',
+                     entity_type='user', entity_id=request.user.id,
+                     new_value={'changed_by': 'self'})
         return Response({'success': True, 'message': 'Password updated successfully'})
 
 
@@ -161,6 +182,10 @@ class AvatarUploadView(APIView):
         if ext not in allowed:
             return Response({'success': False, 'error': 'Only JPG, PNG, WEBP allowed'}, status=400)
 
+        MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+        if image.size > MAX_SIZE:
+            return Response({'success': False, 'error': 'Avatar file too large. Maximum size is 5 MB.'}, status=400)
+
         url = services.upload_avatar(request.user, image)
         return Response({'success': True, 'avatar_url': url})
 
@@ -169,6 +194,7 @@ class AvatarUploadView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes   = [PasswordResetRateThrottle]
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)

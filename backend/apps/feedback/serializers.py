@@ -4,8 +4,13 @@ from .models import FeedbackResponse, FeedbackAnswer, AggregatedResult
 
 class AnswerInputSerializer(serializers.Serializer):
     question_id  = serializers.UUIDField()
-    rating_value = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
-    text_value   = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    rating_value = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False, allow_null=True,
+        min_value=1, max_value=10,
+    )
+    text_value   = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=5000,
+    )
 
     def validate(self, data):
         if data.get('rating_value') is None and not data.get('text_value'):

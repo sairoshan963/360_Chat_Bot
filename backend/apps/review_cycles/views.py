@@ -1,8 +1,15 @@
+import re
+
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from shared.permissions import IsHRAdmin, IsHROrManager, IsSuperAdmin, IsEmployee
+
+
+def _safe_filename(name):
+    """Strip characters that break Content-Disposition headers or file systems."""
+    return re.sub(r'[^\w\-. ]', '_', name).strip()
 from . import services
 from .serializers import (
     TemplateSerializer, TemplateListSerializer,
@@ -93,7 +100,7 @@ class CycleParticipantsView(APIView):
     def get_permissions(self):
         if self.request.method in ('POST', 'DELETE'):
             return [IsAuthenticated(), IsHRAdmin()]
-        return [IsAuthenticated()]
+        return [IsAuthenticated(), IsHROrManager()]
 
     def get(self, request, pk):
         participants = services.get_participants(pk)
@@ -206,7 +213,7 @@ class NominationExcelDownloadView(APIView):
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        fname = f"nominations-{cycle.name.replace(' ', '_')}.xlsx"
+        fname = _safe_filename(f'nominations-{cycle.name}') + '.xlsx'
         response = HttpResponse(buf.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="{fname}"'
         return response
@@ -243,7 +250,7 @@ class ParticipantExcelDownloadView(APIView):
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        fname = f"{label}-{cycle.name.replace(' ', '_')}.xlsx"
+        fname = _safe_filename(f'{label}-{cycle.name}') + '.xlsx'
         response = HttpResponse(buf.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="{fname}"'
         return response

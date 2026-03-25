@@ -1,6 +1,9 @@
+import logging
 import uuid
 from django.db import models
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AuditLog(models.Model):
@@ -36,5 +39,8 @@ class AuditLog(models.Model):
                 ip_address=ip_address,
                 user_agent=user_agent,
             )
-        except Exception:
-            pass  # Audit log failure must never break the main operation
+        except Exception as exc:
+            # Audit log failure must never break the main operation,
+            # but we must at least surface it in server logs.
+            logger.error('AuditLog.log failed: %s | action=%s entity=%s id=%s',
+                         exc, action, entity_type, entity_id, exc_info=True)

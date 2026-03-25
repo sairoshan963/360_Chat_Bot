@@ -86,6 +86,29 @@ def get_template(template_id):
         raise NotFound('Template not found')
 
 
+VALID_QUESTION_TYPES = [t[0] for t in TemplateQuestion.QUESTION_TYPE_CHOICES]
+
+
+def _validate_question(q):
+    """Validate a single question dict. Raises ValidationError on bad data."""
+    q_type = q.get('type', 'RATING')
+    if q_type not in VALID_QUESTION_TYPES:
+        raise ValidationError(f'Invalid question type: {q_type}. Must be one of {VALID_QUESTION_TYPES}')
+    if q_type == 'RATING':
+        r_min = q.get('rating_scale_min')
+        r_max = q.get('rating_scale_max')
+        if r_min is None or r_max is None:
+            raise ValidationError('rating_scale_min and rating_scale_max are required for RATING questions')
+        if not isinstance(r_min, int) or not isinstance(r_max, int):
+            raise ValidationError('rating_scale_min and rating_scale_max must be integers')
+        if r_min < 1:
+            raise ValidationError('rating_scale_min must be ≥ 1')
+        if r_max > 10:
+            raise ValidationError('rating_scale_max must be ≤ 10')
+        if r_min >= r_max:
+            raise ValidationError('rating_scale_min must be less than rating_scale_max')
+
+
 def create_template(name, description, sections, actor):
     if not name:
         raise ValidationError('Template name is required')
@@ -108,6 +131,7 @@ def create_template(name, description, sections, actor):
                 display_order=sec.get('display_order', i + 1),
             )
             for j, q in enumerate(sec.get('questions') or []):
+                _validate_question(q)
                 TemplateQuestion.objects.create(
                     section=section,
                     question_text=q['question_text'].strip(),
@@ -143,6 +167,7 @@ def update_template(template_id, name, sections, actor):
                 display_order=i + 1,
             )
             for j, q in enumerate(sec.get('questions') or []):
+                _validate_question(q)
                 TemplateQuestion.objects.create(
                     section=section,
                     question_text=q['question_text'].strip(),
@@ -159,7 +184,10 @@ def update_template(template_id, name, sections, actor):
 # ─── Cycles ───────────────────────────────────────────────────────────────────
 
 def list_cycles(state=None):
-    qs = ReviewCycle.objects.select_related('template', 'created_by')
+    from django.db.models import Count
+    qs = ReviewCycle.objects.select_related('template', 'created_by').annotate(
+        participant_count=Count('participations', distinct=True)
+    )
     if state:
         valid = [s[0] for s in ReviewCycle.STATE_CHOICES]
         if state not in valid:
@@ -197,6 +225,7 @@ def create_cycle(data, actor):
         raise NotFound('Template not found or inactive')
 
     peer_enabled = data.get('peer_enabled', False)
+    nomination_deadline = data.get('nomination_deadline')
     if peer_enabled:
         peer_min = data.get('peer_min_count')
         peer_max = data.get('peer_max_count')
@@ -206,6 +235,11 @@ def create_cycle(data, actor):
             raise ValidationError('peer_min_count must be ≤ peer_max_count')
         if peer_min < 1:
             raise ValidationError('peer_min_count must be ≥ 1')
+        if not nomination_deadline:
+            raise ValidationError('nomination_deadline is required when peer_enabled')
+
+    if nomination_deadline and nomination_deadline >= review_deadline:
+        raise ValidationError('nomination_deadline must be before review_deadline')
 
     valid_anonymity = [a[0] for a in ReviewCycle.ANONYMITY_CHOICES]
     for field in ['peer_anonymity', 'manager_anonymity', 'self_anonymity']:
@@ -246,6 +280,34 @@ def update_cycle(cycle_id, data, actor):
     if cycle.state != 'DRAFT':
         raise ValidationError('Cycle can only be updated in DRAFT state')
 
+    # ── Peer settings validation ──────────────────────────────────────────────
+    peer_enabled = data.get('peer_enabled', cycle.peer_enabled)
+    if peer_enabled:
+        peer_min = data.get('peer_min_count', cycle.peer_min_count)
+        peer_max = data.get('peer_max_count', cycle.peer_max_count)
+        if not peer_min or not peer_max:
+            raise ValidationError('peer_min_count and peer_max_count are required when peer_enabled')
+        if peer_min < 1:
+            raise ValidationError('peer_min_count must be ≥ 1')
+        if peer_min > peer_max:
+            raise ValidationError('peer_min_count must be ≤ peer_max_count')
+        nomination_deadline = data.get('nomination_deadline', cycle.nomination_deadline)
+        if not nomination_deadline:
+            raise ValidationError('nomination_deadline is required when peer_enabled')
+
+    # ── Anonymity choices validation ──────────────────────────────────────────
+    valid_anonymity = [a[0] for a in ReviewCycle.ANONYMITY_CHOICES]
+    for field in ['peer_anonymity', 'manager_anonymity', 'self_anonymity']:
+        val = data.get(field)
+        if val and val not in valid_anonymity:
+            raise ValidationError(f'Invalid {field} value: {val}')
+
+    # ── Deadline ordering validation ──────────────────────────────────────────
+    review_deadline     = data.get('review_deadline', cycle.review_deadline)
+    nomination_deadline = data.get('nomination_deadline', cycle.nomination_deadline)
+    if nomination_deadline and review_deadline and nomination_deadline >= review_deadline:
+        raise ValidationError('nomination_deadline must be before review_deadline')
+
     allowed = ['name', 'description', 'peer_enabled', 'peer_min_count', 'peer_max_count',
                'peer_threshold', 'peer_anonymity', 'manager_anonymity', 'self_anonymity',
                'nomination_deadline', 'review_deadline', 'quarter', 'quarter_year']
@@ -265,12 +327,27 @@ def add_participants(cycle_id, user_ids, actor):
         raise ValidationError('Participants can only be added in DRAFT or NOMINATION state')
 
     from apps.users.models import User
+    # Only add ACTIVE users — inactive/suspended users cannot participate
+    active_ids = set(
+        str(uid) for uid in
+        User.objects.filter(id__in=user_ids, status='ACTIVE').values_list('id', flat=True)
+    )
+    inactive_count = len(user_ids) - len(active_ids)
+
     participants = [
         CycleParticipant(cycle=cycle, user_id=uid)
-        for uid in user_ids
+        for uid in user_ids if str(uid) in active_ids
     ]
     CycleParticipant.objects.bulk_create(participants, ignore_conflicts=True)
-    return CycleParticipant.objects.filter(cycle=cycle).select_related('user')
+
+    result = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
+    if inactive_count > 0:
+        import logging
+        logging.getLogger(__name__).warning(
+            'add_participants: skipped %d inactive/suspended user(s) for cycle %s',
+            inactive_count, cycle_id
+        )
+    return result
 
 
 def remove_participant(cycle_id, user_id, actor):
@@ -417,6 +494,14 @@ def release_results(cycle_id, actor):
         if cycle.state != 'CLOSED':
             raise ValidationError(f'Cannot release results from state: {cycle.state}')
 
+        from apps.reviewer_workflow.models import ReviewerTask
+        submitted_count = ReviewerTask.objects.filter(cycle=cycle, status='SUBMITTED').count()
+        if submitted_count == 0:
+            raise ValidationError(
+                'No submitted feedback found for this cycle. '
+                'Release results only after at least one feedback is submitted.'
+            )
+
         # Run aggregation
         from apps.feedback.services import aggregate_cycle
         aggregate_cycle(cycle)
@@ -465,9 +550,19 @@ def override_cycle(cycle_id, target_state, reason, actor):
         cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
         old_state = cycle.state
 
+        from apps.reviewer_workflow.models import ReviewerTask
+
+        # Generate tasks when overriding to ACTIVE if none exist yet
+        if target_state == 'ACTIVE' and not ReviewerTask.objects.filter(cycle=cycle).exists():
+            participants = list(
+                CycleParticipant.objects.filter(cycle=cycle)
+                .select_related('user__manager_relation__manager')
+            )
+            if participants:
+                _generate_reviewer_tasks(cycle, participants)
+
         # Lock tasks when moving to a closed state
         if target_state in ['CLOSED', 'RESULTS_RELEASED', 'ARCHIVED']:
-            from apps.reviewer_workflow.models import ReviewerTask
             ReviewerTask.objects.filter(
                 cycle=cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
             ).update(status='LOCKED')
@@ -502,28 +597,40 @@ def get_nomination_status(cycle_id):
     from apps.reviewer_workflow.models import PeerNomination
     from django.db.models import Count, Q
 
-    participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user')
-    result = []
+    participants = CycleParticipant.objects.filter(cycle=cycle).select_related('user__department')
 
-    for p in participants:
-        agg = PeerNomination.objects.filter(cycle=cycle, reviewee=p.user).aggregate(
+    # Single aggregated query for all participants — avoids N queries
+    nomination_stats = (
+        PeerNomination.objects.filter(cycle=cycle)
+        .values('reviewee_id')
+        .annotate(
             nominated=Count('id'),
             approved=Count('id', filter=Q(status='APPROVED')),
             pending=Count('id', filter=Q(status='PENDING')),
             rejected=Count('id', filter=Q(status='REJECTED')),
         )
+    )
+    stats_map = {str(s['reviewee_id']): s for s in nomination_stats}
+
+    result = []
+    min_req = cycle.peer_min_count or 0
+    for p in participants:
+        uid = str(p.user.id)
+        agg = stats_map.get(uid, {'nominated': 0, 'approved': 0, 'pending': 0, 'rejected': 0})
         nominated = agg['nominated']
-        min_req   = cycle.peer_min_count or 0
-        status    = 'NOT_STARTED' if nominated == 0 else ('DONE' if nominated >= min_req else 'INCOMPLETE')
+        status = 'NOT_STARTED' if nominated == 0 else ('DONE' if nominated >= min_req else 'INCOMPLETE')
         result.append({
-            'user_id':    str(p.user.id),
+            'user_id':    uid,
             'email':      p.user.email,
             'first_name': p.user.first_name,
             'last_name':  p.user.last_name,
             'department': p.user.department.name if p.user.department_id else None,
             'min_required': min_req,
             'status':     status,
-            **agg,
+            'nominated':  agg['nominated'],
+            'approved':   agg['approved'],
+            'pending':    agg['pending'],
+            'rejected':   agg['rejected'],
         })
     return result
 
@@ -535,17 +642,26 @@ def get_participant_task_status(cycle_id):
 
     participants = CycleParticipant.objects.filter(
         cycle_id=cycle_id
-    ).select_related('user__department').prefetch_related(
-        'user__tasks_as_reviewer'
+    ).select_related('user__department')
+
+    # Single aggregated query for all reviewer task statuses — avoids 4N queries
+    task_stats = (
+        ReviewerTask.objects.filter(cycle_id=cycle_id)
+        .values('reviewer_id')
+        .annotate(
+            total=Count('id'),
+            submitted=Count('id', filter=Q(status='SUBMITTED')),
+            locked=Count('id', filter=Q(status='LOCKED')),
+            pending=Count('id', filter=Q(status__in=['CREATED', 'PENDING', 'IN_PROGRESS'])),
+        )
     )
+    stats_map = {str(s['reviewer_id']): s for s in task_stats}
 
     result = []
     for p in participants:
-        tasks = ReviewerTask.objects.filter(cycle_id=cycle_id, reviewer=p.user)
-        total     = tasks.count()
-        submitted = tasks.filter(status='SUBMITTED').count()
-        locked    = tasks.filter(status='LOCKED').count()
-        pending   = tasks.filter(status__in=['CREATED', 'PENDING', 'IN_PROGRESS']).count()
+        uid = str(p.user.id)
+        s = stats_map.get(uid, {'total': 0, 'submitted': 0, 'locked': 0, 'pending': 0})
+        total, submitted, locked, pending = s['total'], s['submitted'], s['locked'], s['pending']
 
         if total == 0:           overall = 'NO_TASKS'
         elif pending > 0:        overall = 'PENDING'
@@ -555,7 +671,7 @@ def get_participant_task_status(cycle_id):
         else:                    overall = 'MISSED'
 
         result.append({
-            'user_id':    str(p.user.id),
+            'user_id':    uid,
             'first_name': p.user.first_name,
             'last_name':  p.user.last_name,
             'email':      p.user.email,

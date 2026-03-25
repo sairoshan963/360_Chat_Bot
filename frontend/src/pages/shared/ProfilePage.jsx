@@ -139,7 +139,9 @@ export default function ProfilePage() {
                 {avatarSrc && <Button size="small" danger icon={<DeleteOutlined />} onClick={handleRemoveAvatar} loading={removing} style={{ borderRadius: 8, fontSize: 12 }}>Remove</Button>}
               </div>
 
-              <div style={{ fontWeight: 700, fontSize: 18, color: '#1e293b', marginBottom: 3 }}>{user?.display_name || [user?.first_name, user?.middle_name, user?.last_name].filter(Boolean).join(' ')}</div>
+              <div style={{ fontWeight: 700, fontSize: 18, color: '#1e293b', marginBottom: 3 }}>
+                {user?.display_name?.trim() || [user?.first_name, user?.middle_name, user?.last_name].filter(Boolean).join(' ')}
+              </div>
               {user?.job_title && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>{user.job_title}</div>}
               <div style={{ marginBottom: 14 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: ROLE_BG[user?.role], color: ROLE_COLOR[user?.role], fontWeight: 600, fontSize: 12, padding: '4px 12px', borderRadius: 20 }}>
@@ -168,10 +170,12 @@ export default function ProfilePage() {
               <Form form={profileForm} layout="vertical" initialValues={{ first_name: user?.first_name, middle_name: user?.middle_name, last_name: user?.last_name, display_name: user?.display_name, job_title: user?.job_title }} onFinish={handleSaveProfile}>
                 <Row gutter={16}>
                   <Col span={8}><Form.Item name="first_name"  label="First Name"  rules={[{ required: true, message: 'Required' }]}><Input placeholder="First name" /></Form.Item></Col>
-                  <Col span={8}><Form.Item name="middle_name" label="Middle Name"><Input placeholder="Middle name (optional)" /></Form.Item></Col>
+                  <Col span={8}><Form.Item name="middle_name" label="Middle Name"><Input placeholder="Middle name" /></Form.Item></Col>
                   <Col span={8}><Form.Item name="last_name"  label="Last Name"  rules={[{ required: true, message: 'Required' }]}><Input placeholder="Last name" /></Form.Item></Col>
                 </Row>
-                <Form.Item name="display_name" label="Display Name"><Input placeholder="Short name shown across the app (optional)" /></Form.Item>
+                <Form.Item name="display_name" label="Display Name">
+                  <Input placeholder="e.g. Rama, Teja K" maxLength={100} />
+                </Form.Item>
                 <Form.Item name="job_title" label="Job Title"><Input placeholder="e.g. Senior Engineer, Product Manager" disabled /></Form.Item>
                 <Row gutter={16}>
                   <Col span={12}><Form.Item label="Email"><Input value={user?.email} disabled prefix={<MailOutlined />} /></Form.Item></Col>

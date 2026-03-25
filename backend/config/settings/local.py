@@ -18,7 +18,4 @@ if os.environ.get('USE_POSTGRES', '').lower() != 'true':
 # ─── Email: print to console instead of sending ───────────────────────────────
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-# ─── Faster password hashing in development ───────────────────────────────────
-PASSWORD_HASHERS = [
-    'django.contrib.auth.hashers.MD5PasswordHasher',
-]
+# Use default (PBKDF2) — MD5 is broken even for dev, no speed benefit worth the risk

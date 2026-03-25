@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -17,11 +18,8 @@ class AnnouncementListView(APIView):
         announcements = Announcement.objects.filter(
             is_active=True
         ).filter(
-            expires_at__isnull=True
-        ) | Announcement.objects.filter(
-            is_active=True, expires_at__gt=now
-        )
-        announcements = announcements.order_by('-created_at')
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+        ).distinct().order_by('-created_at')
         return Response({
             'success': True,
             'announcements': AnnouncementSerializer(announcements, many=True).data,

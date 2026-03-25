@@ -1,6 +1,7 @@
 import csv
 import io
 
+from django.db import transaction
 from django.db.models import Q
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -23,9 +24,7 @@ User = get_user_model()
 # ─── Users ────────────────────────────────────────────────────────────────────
 
 class UserListCreateView(APIView):
-    # GET is open to HR_ADMIN (needs to pick participants for cycles)
-    # POST (create user) remains SUPER_ADMIN only — enforced inside post()
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     def get(self, request):
         qs = User.objects.select_related('department', 'manager_relation__manager').all()
@@ -53,18 +52,22 @@ class UserListCreateView(APIView):
         return Response({'success': True, 'users': UserSerializer(qs, many=True).data})
 
     def post(self, request):
-        if request.user.role != 'SUPER_ADMIN':
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Only Super Admin can create users.')
         serializer = CreateUserSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+
         from apps.audit.models import AuditLog
         AuditLog.log(
             actor=request.user, action='USER_CREATED',
             entity_type='user', entity_id=user.id,
-            new_value={'email': user.email, 'role': user.role},
+            new_value={
+                'email': user.email,
+                'name': user.get_full_name(),
+                'role': user.role,
+                'status': user.status,
+            },
         )
+
         return Response({'success': True, 'user': UserSerializer(user).data}, status=201)
 
 
@@ -87,15 +90,33 @@ class UserDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({'success': False, 'error': 'User not found'}, status=404)
+
+        old_value = {
+            'email': user.email,
+            'name': user.get_full_name(),
+            'role': user.role,
+            'status': user.status,
+            'job_title': user.job_title,
+        }
+
         serializer = UpdateUserSerializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+
         from apps.audit.models import AuditLog
         AuditLog.log(
             actor=request.user, action='USER_UPDATED',
-            entity_type='user', entity_id=user.id,
-            new_value={k: request.data[k] for k in request.data},
+            entity_type='user', entity_id=updated.id,
+            old_value=old_value,
+            new_value={
+                'email': updated.email,
+                'name': updated.get_full_name(),
+                'role': updated.role,
+                'status': updated.status,
+                'job_title': updated.job_title,
+            },
         )
+
         return Response({'success': True, 'user': UserSerializer(updated).data})
 
     def delete(self, request, pk):
@@ -103,16 +124,17 @@ class UserDetailView(APIView):
         if not user:
             return Response({'success': False, 'error': 'User not found'}, status=404)
         if user == request.user:
-            return Response({'success': False, 'error': 'Cannot deactivate your own account'}, status=400)
-        user.status = 'INACTIVE'
-        user.save(update_fields=['status'])
+            return Response({'success': False, 'error': 'Cannot delete your own account'}, status=400)
+
         from apps.audit.models import AuditLog
         AuditLog.log(
-            actor=request.user, action='USER_DEACTIVATED',
+            actor=request.user, action='USER_DELETED',
             entity_type='user', entity_id=user.id,
-            new_value={'email': user.email, 'status': 'INACTIVE'},
+            new_value={'email': user.email, 'name': user.get_full_name()},
         )
-        return Response({'success': True, 'message': 'User deactivated'})
+
+        user.delete()
+        return Response({'success': True, 'message': 'User deleted'})
 
 
 # ─── Admin: Reset a specific user's password ─────────────────────────────────
@@ -172,81 +194,103 @@ class UserBulkImportView(APIView):
         if not file:
             return Response({'success': False, 'error': 'No file uploaded'}, status=400)
 
+        # ── File type validation ──────────────────────────────────────────────
+        import os
+        ext = os.path.splitext(file.name)[1].lower()
+        if ext not in ['.csv']:
+            return Response({'success': False, 'error': 'Only CSV files are allowed'}, status=400)
+
+        # ── File size limit: 5 MB ─────────────────────────────────────────────
+        MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+        if file.size > MAX_SIZE:
+            return Response({'success': False, 'error': 'File too large. Maximum size is 5 MB.'}, status=400)
+
         content = file.read().decode('utf-8-sig')  # handle BOM from Excel exports
         reader  = csv.DictReader(io.StringIO(content))
+
+        # ── Row limit: prevent DoS via giant CSV ──────────────────────────────
+        MAX_ROWS = 5000
+        all_rows = list(reader)
+        if len(all_rows) > MAX_ROWS:
+            return Response({'success': False, 'error': f'File exceeds maximum row limit of {MAX_ROWS}.'}, status=400)
+
         created = 0
         skipped = 0
         updated = 0
         errors  = []
         manager_assignments = []  # defer until after all users created
 
-        for i, row in enumerate(reader, start=2):
-            email = (row.get('email') or '').strip().lower()
-            if not email:
-                errors.append({'row': i, 'error': 'email is required'})
-                continue
+        with transaction.atomic():
+            for i, row in enumerate(all_rows, start=2):
+                email = (row.get('email') or '').strip().lower()
+                if not email:
+                    errors.append({'row': i, 'error': 'email is required'})
+                    continue
 
-            # Department — auto-create
-            dept_name = (row.get('department') or '').strip()
-            dept = None
-            if dept_name:
-                dept, _ = Department.objects.get_or_create(name=dept_name)
+                # Department — auto-create
+                dept_name = (row.get('department') or '').strip()
+                dept = None
+                if dept_name:
+                    dept, _ = Department.objects.get_or_create(name=dept_name)
 
-            role = (row.get('role') or 'EMPLOYEE').strip().upper()
-            if role not in ['SUPER_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']:
-                role = 'EMPLOYEE'
+                role = (row.get('role') or 'EMPLOYEE').strip().upper()
+                if role not in ['SUPER_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']:
+                    role = 'EMPLOYEE'
 
-            manager_email = (row.get('manager_email') or '').strip().lower()
+                manager_email = (row.get('manager_email') or '').strip().lower()
 
-            if User.objects.filter(email=email).exists():
-                # Update department if provided and not already set
-                existing = User.objects.get(email=email)
-                changed = False
-                if dept and not existing.department_id:
-                    existing.department = dept
-                    changed = True
-                if role and existing.role != role:
-                    existing.role = role
-                    changed = True
-                if changed:
-                    existing.save()
-                    updated += 1
-                else:
-                    skipped += 1
+                if User.objects.filter(email=email).exists():
+                    # Update department if provided and not already set
+                    existing = User.objects.get(email=email)
+                    changed = False
+                    if dept and not existing.department_id:
+                        existing.department = dept
+                        changed = True
+                    if role and existing.role != role:
+                        existing.role = role
+                        changed = True
+                    if changed:
+                        existing.save()
+                        updated += 1
+                    else:
+                        skipped += 1
+                    if manager_email:
+                        manager_assignments.append((email, manager_email))
+                    continue
+
+                user = User(
+                    email=email,
+                    first_name=(row.get('first_name') or '').strip(),
+                    middle_name=(row.get('middle_name') or '').strip() or None,
+                    last_name=(row.get('last_name') or '').strip(),
+                    job_title=(row.get('job_title') or '').strip() or None,
+                    role=role,
+                    status='ACTIVE',
+                    department=dept,
+                )
+                user.set_unusable_password()
+                user.save()
+                created += 1
+
                 if manager_email:
                     manager_assignments.append((email, manager_email))
-                continue
 
-            user = User(
-                email=email,
-                first_name=(row.get('first_name') or '').strip(),
-                middle_name=(row.get('middle_name') or '').strip() or None,
-                last_name=(row.get('last_name') or '').strip(),
-                job_title=(row.get('job_title') or '').strip() or None,
-                role=role,
-                status='ACTIVE',
-                department=dept,
-            )
-            user.set_unusable_password()
-            user.save()
-            created += 1
-
-            if manager_email:
-                manager_assignments.append((email, manager_email))
-
-        # ── 2nd pass: assign managers (all users now exist) ──────────────
-        manager_linked = 0
-        manager_errors = []
-        for emp_email, mgr_email in manager_assignments:
-            try:
-                emp = User.objects.get(email=emp_email)
-                mgr = User.objects.get(email=mgr_email)
-                OrgHierarchy.objects.update_or_create(
-                    employee=emp, defaults={'manager': mgr}
-                )
-                manager_linked += 1
-            except User.DoesNotExist:
-                manager_errors.append(f'{emp_email} → manager {mgr_email} not found')
+            # ── 2nd pass: assign managers (all users now exist) ──────────────
+            manager_linked = 0
+            manager_errors = []
+            for emp_email, mgr_email in manager_assignments:
+                if emp_email == mgr_email:
+                    manager_errors.append(f'{emp_email}: cannot be their own manager')
+                    continue
+                try:
+                    emp = User.objects.get(email=emp_email)
+                    mgr = User.objects.get(email=mgr_email)
+                    OrgHierarchy.objects.update_or_create(
+                        employee=emp, defaults={'manager': mgr}
+                    )
+                    manager_linked += 1
+                except User.DoesNotExist:
+                    manager_errors.append(f'{emp_email} → manager {mgr_email} not found')
 
         from apps.audit.models import AuditLog
         AuditLog.log(
@@ -308,6 +352,11 @@ class DepartmentDetailView(APIView):
 class OrgHierarchyView(APIView):
     """Returns org hierarchy filtered by the requesting user's role."""
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), IsHRAdmin()]
+        return [IsAuthenticated()]
 
     def _subtree_ids(self, root_id, all_users_by_manager):
         """Recursively collect IDs of root and all descendants."""

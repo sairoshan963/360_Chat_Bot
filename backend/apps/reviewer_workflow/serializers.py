@@ -12,6 +12,7 @@ class ReviewerTaskSerializer(serializers.ModelSerializer):
     reviewee_last     = serializers.CharField(source='reviewee.last_name',     read_only=True)
     reviewee_email    = serializers.EmailField(source='reviewee.email',        read_only=True)
     submitted_answers = serializers.SerializerMethodField()
+    draft_answers     = serializers.SerializerMethodField()
 
     class Meta:
         model  = ReviewerTask
@@ -19,8 +20,8 @@ class ReviewerTaskSerializer(serializers.ModelSerializer):
             'id', 'cycle', 'cycle_name', 'cycle_state', 'review_deadline', 'template_id',
             'template',
             'reviewee', 'reviewee_first', 'reviewee_last', 'reviewee_email',
-            'reviewer_type', 'anonymity_mode', 'status', 'draft_answers',
-            'submitted_answers',
+            'reviewer_type', 'anonymity_mode', 'status',
+            'draft_answers', 'submitted_answers',
             'created_at', 'updated_at',
         ]
 
@@ -32,6 +33,12 @@ class ReviewerTaskSerializer(serializers.ModelSerializer):
             'name':     t.name,
             'sections': TemplateSectionSerializer(t.sections.all(), many=True).data,
         }
+
+    def get_draft_answers(self, obj):
+        # Only return draft answers in detail context — not in list to avoid bulk data exposure
+        if self.context.get('detail'):
+            return obj.draft_answers
+        return None
 
     def get_submitted_answers(self, obj):
         if obj.status not in ['SUBMITTED', 'LOCKED']:

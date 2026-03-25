@@ -1,7 +1,14 @@
+import re
+
 from django.http import HttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+
+def _safe_filename(name):
+    """Strip characters that break Content-Disposition headers or file systems."""
+    return re.sub(r'[^\w\-. ]', '_', name).strip()
 
 from shared.permissions import IsEmployee, IsHRAdmin, IsHROrManager, IsSuperAdmin
 from . import services
@@ -79,7 +86,7 @@ class ExportReportView(APIView):
         from apps.users.models import User
         try:
             emp = User.objects.get(id=employee_id)
-            filename = f'360_report_{emp.last_name}_{emp.first_name}_{cycle_id}.xlsx'
+            filename = _safe_filename(f'360_report_{emp.last_name}_{emp.first_name}') + '.xlsx'
         except Exception:
             filename = f'360_report_{employee_id}.xlsx'
 
@@ -91,17 +98,23 @@ class ExportReportView(APIView):
         return response
 
 
-# ─── Bulk Excel Export — All Reports for a Cycle ──────────────────────────────
+# ─── Bulk Excel Export (all employees in a cycle) ─────────────────────────────
 
 class ExportAllReportsView(APIView):
-    """HR Admin: download all employees' reports for a cycle as a single Excel file."""
+    """HR Admin: download all employees' reports for a cycle as one Excel file."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def get(self, request, cycle_id):
-        buffer, cycle_name = services.export_all_reports_excel(cycle_id, request.user)
-        safe_name = ''.join(c if c.isalnum() or c in ' _-' else '_' for c in cycle_name)
-        filename  = f'360_all_reports_{safe_name}.xlsx'
-        response  = HttpResponse(
+        buffer = services.export_all_reports_excel(cycle_id, request.user)
+
+        from apps.review_cycles.models import ReviewCycle
+        try:
+            cycle = ReviewCycle.objects.get(id=cycle_id)
+            filename = _safe_filename(f'360_all_reports_{cycle.name}') + '.xlsx'
+        except Exception:
+            filename = f'360_all_reports_{cycle_id}.xlsx'
+
+        response = HttpResponse(
             buffer.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )

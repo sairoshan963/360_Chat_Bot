@@ -26,14 +26,15 @@ def _token_for_user(user):
 
 def _user_data(user):
     return {
-        'id':          str(user.id),
-        'email':       user.email,
-        'first_name':  user.first_name,
-        'middle_name': user.middle_name,
-        'last_name':   user.last_name,
-        'job_title':  user.job_title,
-        'role':       user.role,
-        'avatar_url': user.avatar_url,
+        'id':           str(user.id),
+        'email':        user.email,
+        'first_name':   user.first_name,
+        'middle_name':  user.middle_name,
+        'last_name':    user.last_name,
+        'display_name': user.display_name,
+        'job_title':    user.job_title,
+        'role':         user.role,
+        'avatar_url':   user.avatar_url,
     }
 
 
@@ -44,6 +45,9 @@ def login(email, password):
         user = User.objects.get(email=email)
     except User.DoesNotExist:
         raise AuthenticationFailed('Invalid email or password')
+
+    if user.status == 'SUSPENDED':
+        raise PermissionDenied('Your account has been suspended. Contact HR.')
 
     if user.status != 'ACTIVE':
         raise PermissionDenied('Account is not active')
@@ -64,6 +68,9 @@ def login_with_google(google_email, given_name='', family_name=''):
         user = User.objects.get(email=google_email)
     except User.DoesNotExist:
         raise PermissionDenied('No account linked to this email. Contact HR.')
+
+    if user.status == 'SUSPENDED':
+        raise PermissionDenied('Your account has been suspended. Contact HR.')
 
     if user.status != 'ACTIVE':
         raise PermissionDenied('Account is not active')
@@ -94,12 +101,13 @@ def get_me(user_id):
 
 # ─── Profile Update ───────────────────────────────────────────────────────────
 
-def update_profile(user, first_name, middle_name, last_name, job_title):
-    user.first_name  = first_name.strip()
-    user.middle_name = middle_name.strip() if middle_name else None
-    user.last_name   = last_name.strip()
-    user.job_title   = job_title.strip() if job_title else None
-    user.save(update_fields=['first_name', 'middle_name', 'last_name', 'job_title', 'updated_at'])
+def update_profile(user, first_name, middle_name, last_name, display_name, job_title):
+    user.first_name   = first_name.strip()
+    user.middle_name  = middle_name.strip() if middle_name else None
+    user.last_name    = last_name.strip()
+    user.display_name = display_name.strip() if display_name else None
+    user.job_title    = job_title.strip() if job_title else None
+    user.save(update_fields=['first_name', 'middle_name', 'last_name', 'display_name', 'job_title', 'updated_at'])
     return user
 
 
@@ -110,6 +118,8 @@ def change_password(user, current_password, new_password):
         raise ValidationError('Current password is incorrect')
     user.set_password(new_password)
     user.save(update_fields=['password'])
+    # Invalidate any outstanding password reset tokens so old links can't be used
+    PasswordResetToken.objects.filter(user=user).delete()
 
 
 # ─── Avatar Upload ────────────────────────────────────────────────────────────

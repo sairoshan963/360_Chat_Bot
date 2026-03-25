@@ -54,16 +54,20 @@ export default function EmployeeTasksPage() {
       const tag = !['SUBMITTED','LOCKED'].includes(r.status) ? deadlineTag(v) : null;
       return <Space size={6}><span>{new Date(v).toLocaleDateString()}</span>{tag}</Space>;
     }},
-    { title: 'Status',       dataIndex: 'status', render: (v) => <Tag color={STATUS_COLOR[v]||'default'}>{v}</Tag> },
+    { title: 'Status', dataIndex: 'status', render: (v, r) => {
+      const effectiveStatus = r.cycle_state !== 'ACTIVE' && !['SUBMITTED','LOCKED'].includes(v) ? 'LOCKED' : v;
+      return <Tag color={STATUS_COLOR[effectiveStatus]||'default'}>{effectiveStatus}</Tag>;
+    }},
     { title: 'Action', render: (_, r) => {
-      const isLocked = ['SUBMITTED','LOCKED'].includes(r.status) || r.cycle_state !== 'ACTIVE';
+      const isLocked = ['SUBMITTED','LOCKED'].includes(r.status) || (r.cycle_state !== 'ACTIVE' && r.status !== 'SUBMITTED');
       if (isLocked) return <Button size="small" onClick={() => navigate(`/employee/tasks/${r.id}`)}>View</Button>;
       return <Button type="primary" size="small" onClick={() => navigate(`/employee/tasks/${r.id}`)}>{['IN_PROGRESS','DRAFT'].includes(r.status)?'Continue':'Start'}</Button>;
     }},
   ];
 
-  const pending   = visibleTasks.filter((t) => ['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status) && t.cycle_state === 'ACTIVE');
-  const completed = visibleTasks.filter((t) => ['SUBMITTED','LOCKED'].includes(t.status) || (['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status) && t.cycle_state !== 'ACTIVE'));
+  const isActionable = (t) => ['CREATED','PENDING','IN_PROGRESS','DRAFT'].includes(t.status) && t.cycle_state === 'ACTIVE';
+  const pending   = visibleTasks.filter(isActionable);
+  const completed = visibleTasks.filter((t) => !isActionable(t));
 
   if (loading) return <Space direction="vertical" size={16} style={{ width: '100%' }}><Card><Skeleton active paragraph={{ rows: 1 }} /></Card><Card><Skeleton active paragraph={{ rows: 5 }} /></Card></Space>;
   if (error) return <Space direction="vertical" size={16} style={{ width: '100%' }}><Card><Title level={4} style={{ margin: 0 }}>My Feedback Tasks</Title></Card><ErrorCard message="Could not load your tasks." onRetry={load} /></Space>;

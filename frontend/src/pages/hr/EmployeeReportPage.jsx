@@ -13,6 +13,7 @@ import { getEmployeeReport, exportEmployeeReport } from '../../api/reports';
 import { getParticipants } from '../../api/cycles';
 import useAuthStore from '../../store/authStore';
 import usePageTitle from '../../hooks/usePageTitle';
+import { formatRatingTableCell } from '../../utils/ratingLabels';
 
 const { Title, Text } = Typography;
 const { Panel } = Collapse;
@@ -40,7 +41,14 @@ const ScoreTooltip = ({ active, payload, label }) => {
 
 const answerCols = [
   { title: 'Question', dataIndex: 'question_text', width: '50%' },
-  { title: 'Rating',   dataIndex: 'rating_value', render: (v) => v != null ? <Tag color="blue">{v}</Tag> : '—' },
+  {
+    title: 'Rating',
+    dataIndex: 'rating_value',
+    render: (v) => {
+      const text = formatRatingTableCell(v);
+      return text != null ? <Tag color="blue">{text}</Tag> : '—';
+    },
+  },
   { title: 'Response', dataIndex: 'text_value',   render: (v) => v || '—' },
 ];
 

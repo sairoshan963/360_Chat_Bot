@@ -62,7 +62,7 @@ export default function AppRouter() {
           <Route path="/admin/users"
             element={<RequireRole roles={['SUPER_ADMIN']}><UsersPage /></RequireRole>} />
           <Route path="/admin/org"
-            element={<RequireRole roles={['SUPER_ADMIN','HR_ADMIN','MANAGER','EMPLOYEE']}><OrgPage /></RequireRole>} />
+            element={<RequireRole roles={['SUPER_ADMIN','HR_ADMIN','MANAGER']}><OrgPage /></RequireRole>} />
           <Route path="/admin/audit"
             element={<RequireRole roles={['SUPER_ADMIN']}><AuditPage /></RequireRole>} />
           <Route path="/admin/chat-analytics"

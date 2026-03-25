@@ -15,7 +15,7 @@ export default function AuthCallbackPage() {
     const error = searchParams.get('error');
 
     if (error || !code) {
-      navigate(`/login?error=${encodeURIComponent(error || 'Google sign-in was cancelled')}`, { replace: true });
+      navigate('/login', { replace: true, state: { error: error || 'Google sign-in was cancelled' } });
       return;
     }
 
@@ -39,7 +39,7 @@ export default function AuthCallbackPage() {
           'Google sign-in failed. Please try again.';
         setErrorMsg(msg);
         setTimeout(() => {
-          navigate(`/login?error=${encodeURIComponent(msg)}`, { replace: true });
+          navigate('/login', { replace: true, state: { error: msg } });
         }, 2500);
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

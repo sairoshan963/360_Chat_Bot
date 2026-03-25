@@ -27,16 +27,19 @@ class ReviewerTask(models.Model):
     cycle          = models.ForeignKey('review_cycles.ReviewCycle', on_delete=models.CASCADE, related_name='tasks')
     reviewee       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tasks_as_reviewee')
     reviewer       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tasks_as_reviewer')
-    reviewer_type  = models.CharField(max_length=20, choices=REVIEWER_TYPE_CHOICES)
+    reviewer_type  = models.CharField(max_length=20, choices=REVIEWER_TYPE_CHOICES, db_index=True)
     anonymity_mode = models.CharField(max_length=20, choices=ANONYMITY_CHOICES, default='TRANSPARENT')
-    status         = models.CharField(max_length=15, choices=STATUS_CHOICES, default='CREATED')
+    status         = models.CharField(max_length=15, choices=STATUS_CHOICES, default='CREATED', db_index=True)
     draft_answers  = models.JSONField(null=True, blank=True)
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table        = 'reviewer_tasks'
-        unique_together = ('cycle', 'reviewee', 'reviewer')
+        unique_together = ('cycle', 'reviewee', 'reviewer', 'reviewer_type')
+        indexes         = [
+            models.Index(fields=['cycle', 'status'], name='idx_rtask_cycle_status'),
+        ]
 
     def __str__(self):
         return f'{self.reviewer_type}: {self.reviewer} → {self.reviewee} [{self.status}]'

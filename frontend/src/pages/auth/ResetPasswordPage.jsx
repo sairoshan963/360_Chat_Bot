@@ -24,7 +24,7 @@ export default function ResetPasswordPage() {
     setError('');
     try {
       await resetPassword(token, new_password);
-      navigate('/login?message=password_reset');
+      navigate('/login', { state: { message: 'password_reset' } });
     } catch (err) {
       setError(err.response?.data?.message || 'Reset failed. The link may have expired.');
     } finally {

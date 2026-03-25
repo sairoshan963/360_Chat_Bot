@@ -22,6 +22,9 @@ class SupportReportView(APIView):
         if not message:
             return Response({'success': False, 'error': 'Message is required'}, status=400)
 
+        if len(message) > 5000:
+            return Response({'success': False, 'error': 'Message must be 5000 characters or fewer'}, status=400)
+
         valid_types = ['Bug', 'Suggestion', 'General']
         if type_ not in valid_types:
             type_ = 'General'

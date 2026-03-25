@@ -30,7 +30,7 @@ class TaskDetailView(APIView):
 
     def get(self, request, pk):
         task = services.get_task(pk, request.user)
-        return Response({'success': True, 'task': ReviewerTaskSerializer(task).data})
+        return Response({'success': True, 'task': ReviewerTaskSerializer(task, context={'detail': True}).data})
 
 
 class SaveDraftView(APIView):
