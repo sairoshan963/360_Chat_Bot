@@ -74,6 +74,10 @@ export default function AuditPage() {
   const [filters, setFilters] = useState({ action_type: '', limit: 200 });
 
   const load = async () => {
+    if (filters.from && filters.to && filters.from > filters.to) {
+      message.error('Start date must be before end date');
+      return;
+    }
     setLoading(true);
     try {
       const params = { limit: filters.limit };

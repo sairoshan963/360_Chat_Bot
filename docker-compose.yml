@@ -57,7 +57,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py init_superadmin && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --access-logfile -"]
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && python manage.py init_superadmin && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 12 --timeout 300 --access-logfile -"]
 
   # ─── Celery Worker ───────────────────────────────────────────────────────────
   celery_worker:
@@ -80,7 +80,7 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
-    command: celery -A config worker --loglevel=info --concurrency=2
+    command: celery -A config worker --loglevel=info --concurrency=12
 
   # ─── Celery Beat (Scheduler) ─────────────────────────────────────────────────
   celery_beat:

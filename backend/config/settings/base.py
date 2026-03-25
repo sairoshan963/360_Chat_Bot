@@ -97,6 +97,10 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD', default='postgres'),
         'HOST':     config('DB_HOST',     default='localhost'),
         'PORT':     config('DB_PORT',     default='5432'),
+        'CONN_MAX_AGE': 600,
+        'OPTIONS': {
+            'connect_timeout': 10,
+        }
     }
 }
 
@@ -159,7 +163,7 @@ REST_FRAMEWORK = {
 # ─── JWT ──────────────────────────────────────────────────────────────────────
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME':  timedelta(days=config('JWT_EXPIRY_DAYS', default=1, cast=int)),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=config('JWT_EXPIRY_MINUTES', default=60, cast=int)),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': config('SECRET_KEY'),

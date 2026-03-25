@@ -311,7 +311,7 @@ class NominatePeersCommand(BaseCommand):
             nominated_names = [f"{n.peer.get_full_name()} ({n.peer.email})" for n in nominations]
             return {
                 "success": True,
-                "message": f"Successfully nominated {nominations.count()} peer(s).",
+                "message": f"Successfully nominated {len(nominated_names)} peer(s).",
                 "data": {"nominated": nominated_names}
             }
         except (ValidationError, PermissionDenied, NotFound) as e:
@@ -376,7 +376,7 @@ class CancelCycleCommand(BaseCommand):
                 except ReviewCycle.DoesNotExist:
                     return {"success": False, "message": "Cycle not found.", "data": {}}
 
-                if cycle.state in ('CLOSED', 'RESULTS_RELEASED', 'ARCHIVED'):
+                if cycle.state not in ('DRAFT', 'NOMINATION', 'FINALIZED', 'ACTIVE'):
                     return {
                         "success": False,
                         "message": f"Cannot cancel a cycle in '{cycle.state}' state. Only DRAFT, NOMINATION, FINALIZED, or ACTIVE cycles can be cancelled.",
@@ -661,8 +661,8 @@ class RetractNominationCommand(BaseCommand):
             peer_name    = peer.get_full_name()
             return {
                 "success": True,
-                "message": f"Removed {peer_name} from your nominations. {remaining.count()} peer(s) remaining.",
-                "data":    {"remaining_count": remaining.count()},
+                "message": f"Removed {peer_name} from your nominations. {len(new_peer_ids)} peer(s) remaining.",
+                "data":    {"remaining_count": len(new_peer_ids)},
             }
         except (ValidationError, PermissionDenied, NotFound) as e:
             return {"success": False, "message": _service_error_message(e), "data": {}}

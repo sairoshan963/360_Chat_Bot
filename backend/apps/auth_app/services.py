@@ -1,5 +1,6 @@
 import hashlib
 import os
+import logging
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -11,6 +12,7 @@ from shared.email import send_password_reset
 from django.conf import settings
 from .models import PasswordResetToken
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
@@ -44,19 +46,23 @@ def login(email, password):
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
+        logger.warning(f'Login attempt with non-existent email: {email}')
         raise AuthenticationFailed('Invalid email or password')
 
     if user.status == 'SUSPENDED':
         raise PermissionDenied('Your account has been suspended. Contact HR.')
 
     if user.status != 'ACTIVE':
+        logger.warning(f'Login attempt for inactive user: {email}')
         raise PermissionDenied('Account is not active')
 
     if not user.check_password(password):
+        logger.warning(f'Failed login attempt for user: {email}')
         raise AuthenticationFailed('Invalid email or password')
 
     user.last_login_at = timezone.now()
     user.save(update_fields=['last_login_at'])
+    logger.info(f'User logged in: {email}')
 
     return {**_token_for_user(user), 'user': _user_data(user)}
 
@@ -127,6 +133,33 @@ def change_password(user, current_password, new_password):
 def upload_avatar(user, image_file):
     import os
     from django.core.files.storage import default_storage
+    from rest_framework.exceptions import ValidationError
+    from PIL import Image
+    import io
+
+    # Validate file size (max 5MB)
+    if image_file.size > 5 * 1024 * 1024:
+        raise ValidationError('Avatar must be smaller than 5MB')
+
+    # Validate file content by attempting to open as image
+    try:
+        # Reset file pointer
+        image_file.seek(0)
+        # Try to open and verify it's a valid image
+        with Image.open(image_file) as img:
+            # Verify it's actually an image format we support
+            if img.format not in ['JPEG', 'PNG', 'WEBP']:
+                raise ValidationError('Only JPEG, PNG, and WEBP images are allowed')
+            # Check image dimensions (reasonable limits)
+            if img.width > 2048 or img.height > 2048:
+                raise ValidationError('Image dimensions must be 2048x2048 pixels or smaller')
+    except Exception as e:
+        if isinstance(e, ValidationError):
+            raise
+        raise ValidationError('Invalid image file')
+    
+    # Reset file pointer after validation
+    image_file.seek(0)
 
     ext      = os.path.splitext(image_file.name)[1].lower()
     filename = f'avatars/{user.id}{ext}'

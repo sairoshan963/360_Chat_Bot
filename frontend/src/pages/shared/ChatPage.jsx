@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Input, Button, Typography, Tooltip, Avatar, Modal } from 'antd';
+import { Input, Button, Typography, Tooltip, Avatar, Modal, Popconfirm } from 'antd';
 import {
   SendOutlined, RobotOutlined, UserOutlined,
   CopyOutlined, CheckOutlined,
@@ -9,7 +9,7 @@ import {
   PlusOutlined, DeleteOutlined, EditOutlined, PushpinOutlined,
   ShrinkOutlined, PaperClipOutlined,
 } from '@ant-design/icons';
-import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, discardSession, deleteSession, renameSession, uploadChatFile } from '../../api/chat';
+import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, discardSession, deleteSession, deleteAllSessions, renameSession, uploadChatFile } from '../../api/chat';
 import useAuthStore from '../../store/authStore';
 import { useSpeechToText } from '../../hooks/useSpeechToText';
 
@@ -311,7 +311,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   // Cycles list
   if (data.cycles?.length) {
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.cycles.map((c, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -332,7 +332,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   // Deadlines
   if (data.deadlines?.length) {
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.deadlines.map((d, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -405,7 +405,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   // Participation stats
   if (data.participation?.length) {
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.participation.map((p, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -565,7 +565,7 @@ function DataCard({ data, onPick, onDirectAction }) {
       MANAGER: '#0e7490', EMPLOYEE: '#374151',
     };
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.employees.map((e, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -594,7 +594,7 @@ function DataCard({ data, onPick, onDirectAction }) {
       success: { bg: '#f0fdf4', border: '#86efac', text: '#15803d', icon: '✅' },
     };
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.announcements.map((a, i) => {
           const c = ANN_COLORS[a.type] || ANN_COLORS.info;
           return (
@@ -605,7 +605,7 @@ function DataCard({ data, onPick, onDirectAction }) {
               <div style={{ fontSize: 13, color: c.text, lineHeight: 1.6 }}>
                 {c.icon} {a.message}
               </div>
-              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>{a.created_at}</div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>{fmtIso(a.created_at)}</div>
             </div>
           );
         })}
@@ -616,7 +616,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   // Audit logs
   if (data.audit_logs?.length) {
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {data.audit_logs.map((l, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -629,7 +629,9 @@ function DataCard({ data, onPick, onDirectAction }) {
                 {' · '}<span style={{ color: '#7c3aed' }}>{l.action}</span>
                 {' on '}<span style={{ color: '#0e7490' }}>{l.entity}</span>
               </div>
-              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{l.at}</div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                {l.at ? new Date(l.at).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+              </div>
             </div>
           </div>
         ))}
@@ -640,7 +642,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   // Feedback results
   if (data.results?.length) {
     return (
-      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ marginTop: 10, maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {data.results.map((r, i) => (
           <div key={i} style={{
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
@@ -685,12 +687,12 @@ function DataCard({ data, onPick, onDirectAction }) {
   if (data.pending_approvals?.length) {
     return (
       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {data.pending_approvals.slice(0, 6).map((a, i) => (
+        {data.pending_approvals.map((a, i) => (
           <div key={i} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b' }}>{a.reviewee} → {a.peer}</div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{a.cycle} · {a.created_at}</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{a.cycle} · {fmtIso(a.created_at)}</div>
               </div>
               <span style={{ fontSize: 10, fontWeight: 600, background: '#fef9c3', color: '#92400e', borderRadius: 20, padding: '2px 10px', border: '1px solid #fde68a' }}>PENDING</span>
             </div>
@@ -707,7 +709,7 @@ function DataCard({ data, onPick, onDirectAction }) {
   if (data.cycle_results?.length) {
     return (
       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {data.cycle_results.slice(0, 8).map((r, i) => (
+        {data.cycle_results.map((r, i) => (
           <div key={i} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
               <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', flex: 1 }}>{r.name}</div>
@@ -749,11 +751,11 @@ function DataCard({ data, onPick, onDirectAction }) {
           borderRadius: 8, padding: '7px 16px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
         }}>⬇ Download CSV ({data.export_nominations.length} rows)</button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {data.export_nominations.slice(0, 5).map((n, i) => (
+          {data.export_nominations.map((n, i) => (
             <div key={i} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 12, color: '#1e293b' }}>{n.reviewee} → {n.peer}</div>
-                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{n.nominated_on}</div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{fmtIso(n.nominated_on)}</div>
               </div>
               <span style={{ fontSize: 10, fontWeight: 600, background: '#f1f5f9', color: '#475569', borderRadius: 20, padding: '2px 8px' }}>{n.status}</span>
             </div>
@@ -895,6 +897,10 @@ function DataCard({ data, onPick, onDirectAction }) {
 }
 
 /* ─── Smart timestamp helpers ───────────────────────────────────────────────── */
+function fmtIso(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 function _dayOf(ts) {
   const d = new Date(ts);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -1552,6 +1558,16 @@ export default function ChatPage() {
     } catch { /* silent */ }
   };
 
+  const handleDeleteAll = async () => {
+    try {
+      await deleteAllSessions();
+      setSessions([]);
+      setMessages([]);
+      setSessionId('');
+      localStorage.removeItem('chat_session_id');
+    } catch { /* silent */ }
+  };
+
   const handleDeleteSession = async (sid) => {
     try {
       await deleteSession(sid);
@@ -1600,14 +1616,34 @@ export default function ChatPage() {
               <div style={{ fontSize: 10.5, color: '#94a3b8' }}>Your 360° assistant</div>
             </div>
           </div>
-          <button
-            onClick={handleNewChat}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg,#667eea,#764ba2)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 8px rgba(102,126,234,0.25)' }}
-            onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
-            onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
-          >
-            <PlusOutlined style={{ fontSize: 11 }} /> New Chat
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={handleNewChat}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'linear-gradient(135deg,#667eea,#764ba2)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 8px rgba(102,126,234,0.25)' }}
+              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+            >
+              <PlusOutlined style={{ fontSize: 11 }} /> New Chat
+            </button>
+            {sessions.length > 0 && (
+              <Popconfirm
+                title="Delete all chats?"
+                description="This will permanently remove all your chat history."
+                okText="Delete All"
+                okButtonProps={{ danger: true }}
+                cancelText="Cancel"
+                onConfirm={handleDeleteAll}
+              >
+                <button
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 10px', fontSize: 12, color: '#ef4444', cursor: 'pointer' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#fef2f2'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                >
+                  <DeleteOutlined style={{ fontSize: 12 }} />
+                </button>
+              </Popconfirm>
+            )}
+          </div>
         </div>
 
         {/* Search */}

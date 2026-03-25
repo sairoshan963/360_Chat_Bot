@@ -44,8 +44,6 @@ def get_task(task_id, user):
 
 
 def save_draft(task_id, user, answers):
-    from apps.review_cycles.models import TemplateQuestion
-
     task = get_task(task_id, user)
 
     if task.status not in ['CREATED', 'PENDING', 'IN_PROGRESS']:
@@ -53,19 +51,6 @@ def save_draft(task_id, user, answers):
 
     if task.cycle.state != 'ACTIVE':
         raise ValidationError('Cycle is not in active state')
-
-    # Validate that all question IDs in the draft belong to this cycle's template
-    if answers:
-        valid_q_ids = set(
-            str(qid) for qid in
-            TemplateQuestion.objects.filter(
-                section__template=task.cycle.template
-            ).values_list('id', flat=True)
-        )
-        submitted_q_ids = {str(a['question_id']) for a in answers if 'question_id' in a}
-        unknown = submitted_q_ids - valid_q_ids
-        if unknown:
-            raise ValidationError('Draft contains invalid question IDs')
 
     task.status        = 'IN_PROGRESS'
     task.draft_answers = answers
@@ -101,62 +86,32 @@ def submit_nominations(cycle_id, user, peer_ids):
     if not CycleParticipant.objects.filter(cycle=cycle, user=user).exists():
         raise PermissionDenied('You are not a participant in this cycle')
 
-    # Deduplicate peer_ids while preserving intent — duplicates are a client bug
-    peer_ids = list(dict.fromkeys(str(p) for p in peer_ids))
-
-    # Cannot nominate yourself
-    if str(user.id) in peer_ids:
-        raise ValidationError('You cannot nominate yourself')
-
-    # All nominated peers must be participants in this cycle
-    participant_ids = set(
-        str(uid) for uid in
-        CycleParticipant.objects.filter(cycle=cycle).values_list('user_id', flat=True)
-    )
-    invalid_peers = [pid for pid in peer_ids if pid not in participant_ids]
-    if invalid_peers:
-        raise ValidationError(
-            f'{len(invalid_peers)} nominated peer(s) are not participants in this cycle'
-        )
-
     if cycle.peer_max_count and len(peer_ids) > cycle.peer_max_count:
         raise ValidationError(f'You can nominate at most {cycle.peer_max_count} peers')
 
     if cycle.peer_min_count and len(peer_ids) < cycle.peer_min_count:
         raise ValidationError(f'You must nominate at least {cycle.peer_min_count} peers')
 
+    # Cannot nominate yourself
+    if str(user.id) in [str(p) for p in peer_ids]:
+        raise ValidationError('You cannot nominate yourself')
+
     auto_approve = cycle.nomination_approval_mode == 'AUTO'
-    new_status   = 'APPROVED' if auto_approve else 'PENDING'
+    status       = 'APPROVED' if auto_approve else 'PENDING'
 
     with transaction.atomic():
-        # Keep APPROVED nominations — only delete PENDING/REJECTED so manager approvals
-        # are not wiped when an employee re-submits to replace a rejected nomination.
-        already_approved_ids = set(
-            str(pid) for pid in
-            PeerNomination.objects.filter(
-                cycle=cycle, reviewee=user, status='APPROVED'
-            ).values_list('peer_id', flat=True)
-        )
-
-        # Remove only non-approved nominations so they can be replaced
-        PeerNomination.objects.filter(
-            cycle=cycle, reviewee=user, status__in=['PENDING', 'REJECTED']
-        ).delete()
-
-        # Only create new nominations for peers not already approved
-        new_peer_ids = [pid for pid in peer_ids if pid not in already_approved_ids]
+        PeerNomination.objects.filter(cycle=cycle, reviewee=user).delete()
         nominations = [
             PeerNomination(
                 cycle=cycle,
                 reviewee=user,
                 peer_id=peer_id,
                 nominated_by=user,
-                status=new_status,
+                status=status,
             )
-            for peer_id in new_peer_ids
+            for peer_id in peer_ids
         ]
-        if nominations:
-            PeerNomination.objects.bulk_create(nominations, ignore_conflicts=True)
+        PeerNomination.objects.bulk_create(nominations, ignore_conflicts=True)
 
     AuditLog.log(actor=user, action='SUBMIT_NOMINATIONS',
                  entity_type='cycle', entity_id=cycle_id,
@@ -204,19 +159,22 @@ def decide_nomination(nomination_id, status, actor, rejection_note=None):
     if status not in ['APPROVED', 'REJECTED']:
         raise ValidationError('Status must be APPROVED or REJECTED')
 
-    if rejection_note and len(rejection_note) > 2000:
-        raise ValidationError('Rejection note cannot exceed 2000 characters')
-
-    # Manager scope check — use explicit DB query to avoid try/except swallowing PermissionDenied
+    # Manager scope check
     if actor.role == 'MANAGER':
-        from apps.users.models import OrgHierarchy
-        if not OrgHierarchy.objects.filter(employee=nomination.reviewee, manager=actor).exists():
+        try:
+            if nomination.reviewee.manager_relation.manager != actor:
+                raise PermissionDenied('You can only decide on nominations for your direct reports')
+        except Exception:
             raise PermissionDenied('You can only decide on nominations for your direct reports')
 
-    nomination.status         = status
-    nomination.approved_by    = actor if status == 'APPROVED' else None
-    nomination.approved_at    = timezone.now() if status == 'APPROVED' else None
-    nomination.rejection_note = rejection_note if status == 'REJECTED' else None
+    nomination.status = status
+    if status == 'APPROVED':
+        nomination.approved_by = actor
+        nomination.approved_at = timezone.now()
+    else:  # REJECTED
+        nomination.approved_by = None  # Clear approved_by for rejected nominations
+        nomination.approved_at = None  # Clear approved_at for rejected nominations
+    nomination.rejection_note = rejection_note or None
     nomination.save(update_fields=['status', 'approved_by', 'approved_at', 'rejection_note'])
 
     AuditLog.log(actor=actor, action=f'NOMINATION_{status}',

@@ -1,6 +1,7 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 
 from shared.permissions import IsEmployee, IsHRAdmin, IsManager, IsHROrManager
 from . import services
@@ -13,14 +14,26 @@ from .serializers import (
 )
 
 
+class StandardPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
 class MyTasksView(APIView):
     """Employee: list all feedback tasks assigned to me."""
     permission_classes = [IsAuthenticated, IsEmployee]
+    pagination_class = StandardPagination
 
     def get(self, request):
         tasks = services.get_my_tasks(request.user)
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(tasks, request)
+        if page is not None:
+            serializer = ReviewerTaskSerializer(page, many=True)
+            return paginator.get_paginated_response({'success': True, 'tasks': serializer.data})
         return Response({'success': True, 'tasks': ReviewerTaskSerializer(tasks, many=True).data})
 
 
@@ -70,9 +83,15 @@ class MyNominationsView(APIView):
 class AllNominationsView(APIView):
     """HR Admin: view all nominations for a cycle."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
+    pagination_class = StandardPagination
 
     def get(self, request, cycle_id):
         nominations = services.get_all_nominations(cycle_id)
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(nominations, request)
+        if page is not None:
+            serializer = NominationSerializer(page, many=True)
+            return paginator.get_paginated_response({'success': True, 'nominations': serializer.data})
         return Response({'success': True, 'nominations': NominationSerializer(nominations, many=True).data})
 
 

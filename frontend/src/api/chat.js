@@ -78,6 +78,9 @@ export const getChatAnalytics = (days = 30) =>
 export const deleteSession = (sessionId) =>
   api.delete(`/chat/sessions/${sessionId}/`);
 
+export const deleteAllSessions = () =>
+  api.delete('/chat/sessions/');
+
 export const renameSession = (sessionId, title) =>
   api.patch(`/chat/sessions/${sessionId}/`, { title });
 

@@ -2,6 +2,7 @@ import logging
 
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
+from django.utils.html import escape
 
 logger = logging.getLogger(__name__)
 
@@ -88,21 +89,25 @@ def _send(subject, to_email, plain_text, html):
 
 def send_password_reset(to_email, first_name, reset_link):
     subject    = 'Reset your Gamyam 360° Feedback password'
+    # Escape user input to prevent XSS
+    safe_first_name = escape(first_name)
+    safe_reset_link = escape(reset_link)
+    
     plain_text = (
-        f'Hi {first_name},\n\n'
-        f'Click the link below to reset your password:\n{reset_link}\n\n'
+        f'Hi {safe_first_name},\n\n'
+        f'Click the link below to reset your password:\n{safe_reset_link}\n\n'
         f'This link expires in 1 hour.\n\n'
         f'If you did not request this, ignore this email.'
     )
     body_html = f"""
       <h2 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#0f172a;">Reset your password</h2>
       <p style="margin:0 0 24px;font-size:15px;color:#64748b;line-height:1.6;">
-        Hi <strong>{first_name}</strong>, we received a request to reset your password.
+        Hi <strong>{safe_first_name}</strong>, we received a request to reset your password.
         Click the button below to set a new one.
       </p>
 
       <div style="text-align:center;margin:32px 0;">
-        <a href="{reset_link}"
+        <a href="{safe_reset_link}"
            style="display:inline-block;background:#FF6B1A;color:#ffffff;font-size:16px;font-weight:700;
                   text-decoration:none;padding:14px 40px;border-radius:8px;
                   box-shadow:0 4px 16px rgba(255,107,26,0.35);">
@@ -113,7 +118,7 @@ def send_password_reset(to_email, first_name, reset_link):
       <p style="margin:24px 0 0;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center;">
         This link expires in <strong style="color:#64748b;">1 hour</strong>.<br/>
         If the button doesn't work, copy this link:<br/>
-        <a href="{reset_link}" style="color:#FF6B1A;word-break:break-all;">{reset_link}</a>
+        <a href="{safe_reset_link}" style="color:#FF6B1A;word-break:break-all;">{safe_reset_link}</a>
       </p>
 
       <div style="margin:28px 0 0;padding:16px;background:#fef3ec;border-left:4px solid #FF6B1A;border-radius:4px;">
@@ -129,23 +134,28 @@ def send_password_reset(to_email, first_name, reset_link):
 
 def send_admin_password_reset(to_email, first_name, reset_link, admin_name):
     subject    = 'Your Gamyam 360° Feedback password has been reset'
+    # Escape user input to prevent XSS
+    safe_first_name = escape(first_name)
+    safe_reset_link = escape(reset_link)
+    safe_admin_name = escape(admin_name)
+    
     plain_text = (
-        f'Hi {first_name},\n\n'
-        f'An administrator ({admin_name}) has initiated a password reset for your account.\n'
-        f'Click the link below to set a new password:\n{reset_link}\n\n'
+        f'Hi {safe_first_name},\n\n'
+        f'An administrator ({safe_admin_name}) has initiated a password reset for your account.\n'
+        f'Click the link below to set a new password:\n{safe_reset_link}\n\n'
         f'This link expires in 1 hour.\n\n'
         f'If this was unexpected, contact your HR administrator.'
     )
     body_html = f"""
       <h2 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#0f172a;">Password Reset Initiated</h2>
       <p style="margin:0 0 24px;font-size:15px;color:#64748b;line-height:1.6;">
-        Hi <strong>{first_name}</strong>,<br/><br/>
-        An administrator (<strong>{admin_name}</strong>) has initiated a password reset for your account.
+        Hi <strong>{safe_first_name}</strong>,<br/><br/>
+        An administrator (<strong>{safe_admin_name}</strong>) has initiated a password reset for your account.
         Click the button below to set a new password.
       </p>
 
       <div style="text-align:center;margin:32px 0;">
-        <a href="{reset_link}"
+        <a href="{safe_reset_link}"
            style="display:inline-block;background:#FF6B1A;color:#ffffff;font-size:16px;font-weight:700;
                   text-decoration:none;padding:14px 40px;border-radius:8px;
                   box-shadow:0 4px 16px rgba(255,107,26,0.35);">
@@ -169,25 +179,30 @@ def send_admin_password_reset(to_email, first_name, reset_link, admin_name):
 # ─── Reminder ─────────────────────────────────────────────────────────────────
 
 def send_reminder(to_email, first_name, cycle_name, deadline_str):
-    subject    = f'Reminder: Pending feedback for "{cycle_name}"'
+    subject    = f'Reminder: Pending feedback for "{escape(cycle_name)}"'
     tasks_link = f'{settings.FRONTEND_URL}/employee/tasks'
+    # Escape user input to prevent XSS
+    safe_first_name = escape(first_name)
+    safe_cycle_name = escape(cycle_name)
+    safe_deadline_str = escape(deadline_str)
+    
     plain_text = (
-        f'Hi {first_name},\n\n'
-        f'You have pending feedback tasks in the review cycle "{cycle_name}".\n'
-        f'Deadline: {deadline_str}\n\n'
+        f'Hi {safe_first_name},\n\n'
+        f'You have pending feedback tasks in the review cycle "{safe_cycle_name}".\n'
+        f'Deadline: {safe_deadline_str}\n\n'
         f'Please complete your feedback at your earliest.\n\n'
         f'Log in: {tasks_link}'
     )
     body_html = f"""
       <h2 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#0f172a;">Pending Feedback Reminder</h2>
       <p style="margin:0 0 24px;font-size:15px;color:#64748b;line-height:1.6;">
-        Hi <strong>{first_name}</strong>, you have pending feedback tasks that need your attention.
+        Hi <strong>{safe_first_name}</strong>, you have pending feedback tasks that need your attention.
       </p>
 
       <div style="background:#f8fafc;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
         <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Review Cycle</p>
-        <p style="margin:0;font-size:18px;font-weight:700;color:#0f172a;">{cycle_name}</p>
-        <p style="margin:8px 0 0;font-size:13px;color:#ef4444;">⏰ Deadline: <strong>{deadline_str}</strong></p>
+        <p style="margin:0;font-size:18px;font-weight:700;color:#0f172a;">{safe_cycle_name}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:#ef4444;">⏰ Deadline: <strong>{safe_deadline_str}</strong></p>
       </div>
 
       <div style="text-align:center;margin:32px 0;">
@@ -199,7 +214,7 @@ def send_reminder(to_email, first_name, cycle_name, deadline_str):
         </a>
       </div>
     """
-    return _send(subject, to_email, plain_text, _html_wrap('Feedback Reminder', f'Pending feedback for {cycle_name}', body_html))
+    return _send(subject, to_email, plain_text, _html_wrap('Feedback Reminder', f'Pending feedback for {safe_cycle_name}', body_html))
 
 
 # ─── Cycle Notification ───────────────────────────────────────────────────────

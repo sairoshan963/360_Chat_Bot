@@ -71,6 +71,9 @@ idna==3.11
 urllib3==2.6.3
 typing_extensions==4.15.0
 
+# ─── Security ────────────────────────────────────────────────────────────────
+django-ratelimit==4.1.0
+
 # ─── Testing (excluded from production Docker image) ──────────────────────────
 pytest==9.0.2
 pytest-django==4.12.0

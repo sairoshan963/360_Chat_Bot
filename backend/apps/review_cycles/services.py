@@ -1,6 +1,9 @@
+import logging
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
+
+logger = logging.getLogger(__name__)
 
 from apps.audit.models import AuditLog
 from apps.notifications.models import Notification
@@ -54,8 +57,8 @@ def _generate_reviewer_tasks(cycle, participants):
                     cycle=cycle, reviewee=user, reviewer=manager,
                     reviewer_type='MANAGER', anonymity_mode=cycle.manager_anonymity,
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("No manager task for user %s: %s", user.id, e)
 
         # PEERS (from approved nominations)
         if cycle.peer_enabled:
@@ -369,7 +372,7 @@ def get_participants(cycle_id):
 # ─── State Machine ────────────────────────────────────────────────────────────
 
 def activate_cycle(cycle_id, actor):
-    """DRAFT → NOMINATION or DRAFT → ACTIVE (if peer disabled)"""
+    """DRAFT → NOMINATION or DRAFT → FINALIZED → ACTIVE (if peer disabled)"""
     with transaction.atomic():
         cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
         if cycle.state != 'DRAFT':
@@ -381,11 +384,19 @@ def activate_cycle(cycle_id, actor):
         if not participants:
             raise ValidationError('Add at least one participant before activating')
 
-        next_state = 'NOMINATION' if (cycle.peer_enabled and cycle.nomination_deadline) else 'ACTIVE'
-        cycle.state = next_state
-
-        if next_state == 'ACTIVE':
+        if cycle.peer_enabled and cycle.nomination_deadline:
+            # Go to nomination phase
+            next_state = 'NOMINATION'
+            cycle.state = next_state
+        else:
+            # Skip nomination, go directly to finalized then active
+            cycle.state = 'FINALIZED'
             _generate_reviewer_tasks(cycle, participants)
+            cycle.save(update_fields=['state', 'updated_at'])
+            
+            # Now transition to ACTIVE
+            cycle.state = 'ACTIVE'
+            next_state = 'ACTIVE'
 
         cycle.save(update_fields=['state', 'updated_at'])
 
@@ -405,8 +416,29 @@ def activate_cycle(cycle_id, actor):
     return _get_cycle_or_404(cycle_id)
 
 
+def start_review_cycle(cycle_id, actor):
+    """FINALIZED → ACTIVE (start the actual review process)"""
+    with transaction.atomic():
+        cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
+        if cycle.state != 'FINALIZED':
+            raise ValidationError(f'Cannot start review from state: {cycle.state}')
+
+        cycle.state = 'ACTIVE'
+        cycle.save(update_fields=['state', 'updated_at'])
+
+    AuditLog.log(actor=actor, action='START_REVIEW_CYCLE', entity_type='review_cycle',
+                 entity_id=cycle_id, old_value={'state': 'FINALIZED'},
+                 new_value={'cycle': cycle.name, 'state': 'ACTIVE'})
+
+    _notify_participants(cycle, 'CYCLE_ACTIVATED', 'Review Cycle Started',
+        f'The review cycle "{cycle.name}" is now active. Please complete your assigned feedback tasks.',
+        '/employee/tasks')
+
+    return _get_cycle_or_404(cycle_id)
+
+
 def finalize_cycle(cycle_id, actor):
-    """NOMINATION → ACTIVE (snapshot + task generation)"""
+    """NOMINATION → FINALIZED (snapshot + task generation)"""
     with transaction.atomic():
         cycle = ReviewCycle.objects.select_for_update().get(id=cycle_id)
         if cycle.state != 'NOMINATION':
@@ -421,15 +453,15 @@ def finalize_cycle(cycle_id, actor):
             _validate_nominations(cycle, participants)
 
         _generate_reviewer_tasks(cycle, participants)
-        cycle.state = 'ACTIVE'
+        cycle.state = 'FINALIZED'  # Changed from 'ACTIVE' to 'FINALIZED'
         cycle.save(update_fields=['state', 'updated_at'])
 
     AuditLog.log(actor=actor, action='FINALIZE_CYCLE', entity_type='review_cycle',
                  entity_id=cycle_id, old_value={'state': 'NOMINATION'},
-                 new_value={'cycle': cycle.name, 'state': 'ACTIVE'})
+                 new_value={'cycle': cycle.name, 'state': 'FINALIZED'})
 
-    _notify_participants(cycle, 'CYCLE_ACTIVATED', 'Review Cycle Started',
-        f'The review cycle "{cycle.name}" is now active. Please complete your assigned feedback tasks.',
+    _notify_participants(cycle, 'CYCLE_FINALIZED', 'Review Cycle Finalized',
+        f'The review cycle "{cycle.name}" has been finalized. Tasks will be activated soon.',
         '/employee/tasks')
 
     return _get_cycle_or_404(cycle_id)
@@ -567,8 +599,11 @@ def override_cycle(cycle_id, target_state, reason, actor):
                 cycle=cycle, status__in=['CREATED', 'PENDING', 'IN_PROGRESS']
             ).update(status='LOCKED')
 
-        cycle.state = target_state
-        cycle.save(update_fields=['state', 'updated_at'])
+        # Bypass model validation by updating directly
+        ReviewCycle.objects.filter(id=cycle_id).update(
+            state=target_state,
+            updated_at=timezone.now()
+        )
 
     AuditLog.log(actor=actor, action='OVERRIDE_ACTION', entity_type='review_cycle',
                  entity_id=cycle_id, old_value={'state': old_state},

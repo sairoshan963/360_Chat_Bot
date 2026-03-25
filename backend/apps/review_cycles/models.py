@@ -83,6 +83,17 @@ class ReviewCycle(models.Model):
     ]
     QUARTER_CHOICES = [('Q1', 'Q1'), ('Q2', 'Q2'), ('Q3', 'Q3'), ('Q4', 'Q4')]
 
+    # Valid state transitions
+    VALID_TRANSITIONS = {
+        'DRAFT': ['NOMINATION', 'ARCHIVED'],
+        'NOMINATION': ['FINALIZED', 'ARCHIVED'],
+        'FINALIZED': ['ACTIVE', 'ARCHIVED'],
+        'ACTIVE': ['CLOSED', 'ARCHIVED'],
+        'CLOSED': ['RESULTS_RELEASED', 'ARCHIVED'],
+        'RESULTS_RELEASED': ['ARCHIVED'],
+        'ARCHIVED': [],
+    }
+
     id                      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name                    = models.CharField(max_length=255)
     description             = models.TextField(blank=True, null=True)
@@ -122,6 +133,16 @@ class ReviewCycle(models.Model):
 
     def __str__(self):
         return f'{self.name} [{self.state}]'
+
+    def save(self, *args, **kwargs):
+        # Validate state transitions
+        if self.pk:  # Only validate on update, not on create
+            old_instance = ReviewCycle.objects.get(pk=self.pk)
+            if old_instance.state != self.state:
+                if self.state not in self.VALID_TRANSITIONS.get(old_instance.state, []):
+                    from django.core.exceptions import ValidationError
+                    raise ValidationError(f'Cannot transition from {old_instance.state} to {self.state}')
+        super().save(*args, **kwargs)
 
 
 class CycleParticipant(models.Model):

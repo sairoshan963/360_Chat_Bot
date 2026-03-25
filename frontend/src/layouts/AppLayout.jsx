@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Avatar, Dropdown, Typography, Space } from 'antd';
 import {
@@ -6,13 +6,14 @@ import {
   FileTextOutlined, SyncOutlined, CheckSquareOutlined,
   TrophyOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   DashboardOutlined, SafetyOutlined, UsergroupAddOutlined, ProfileOutlined,
-  WarningOutlined, NotificationOutlined,
+  WarningOutlined, NotificationOutlined, RobotOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../store/authStore';
 import { logout } from '../api/auth';
 import NotificationBell from '../components/shared/NotificationBell';
 import FeedbackButton from '../components/shared/FeedbackButton';
 import AnnouncementBanner from '../components/shared/AnnouncementBanner';
+import ChatWidget from '../components/ChatWidget';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -29,20 +30,24 @@ function navItems(role) {
 
   if (role === 'SUPER_ADMIN') {
     all.push(
-      { key: '/admin/users',  icon: <UserOutlined />,   label: 'Users' },
-      { key: '/admin/org',    icon: <TeamOutlined />,   label: 'Org Hierarchy' },
-      { key: '/admin/audit',  icon: <SafetyOutlined />, label: 'Audit Logs' },
+      { key: '/admin/users',           icon: <UserOutlined />,   label: 'Users' },
+      { key: '/admin/org',             icon: <TeamOutlined />,   label: 'Org Hierarchy' },
+      { key: '/admin/audit',           icon: <SafetyOutlined />, label: 'Audit Logs' },
+      { key: '/admin/chat-analytics',  icon: <RobotOutlined />,  label: 'Chat Analytics' },
     );
   }
 
   if (['HR_ADMIN', 'SUPER_ADMIN'].includes(role)) {
     all.push(
-      { key: '/hr/cycles',        icon: <SyncOutlined />,         label: 'Cycles' },
-      { key: '/hr/templates',     icon: <FileTextOutlined />,     label: 'Templates' },
-      { key: '/hr/dashboard',     icon: <BarChartOutlined />,     label: 'HR Dashboard' },
-      { key: '/hr/reports',       icon: <TrophyOutlined />,       label: 'View Reports' },
-      { key: '/hr/announcements', icon: <NotificationOutlined />, label: 'Announcements' },
+      { key: '/hr/cycles',             icon: <SyncOutlined />,         label: 'Cycles' },
+      { key: '/hr/templates',          icon: <FileTextOutlined />,     label: 'Templates' },
+      { key: '/hr/dashboard',          icon: <BarChartOutlined />,     label: 'HR Dashboard' },
+      { key: '/hr/reports',            icon: <TrophyOutlined />,       label: 'View Reports' },
+      { key: '/hr/announcements',      icon: <NotificationOutlined />, label: 'Announcements' },
     );
+    if (role === 'HR_ADMIN') {
+      all.push({ key: '/admin/chat-analytics', icon: <RobotOutlined />, label: 'Chat Analytics' });
+    }
   }
 
   if (['MANAGER', 'SUPER_ADMIN'].includes(role)) {
@@ -67,16 +72,18 @@ function navItems(role) {
     );
   }
 
+  // AI Chat is accessible via the top navbar button — not duplicated in sidebar
+
   return all;
 }
 
 const useIsMobile = () => {
   const [mobile, setMobile] = useState(() => window.innerWidth < 768);
-  useState(() => {
+  useEffect(() => {
     const handler = () => setMobile(window.innerWidth < 768);
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
-  });
+  }, []);
   return mobile;
 };
 
@@ -85,6 +92,10 @@ export default function AppLayout() {
   const [collapsed,  setCollapsed]  = useState(() => window.innerWidth < 768);
   const [reportOpen, setReportOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [chatOpen,   setChatOpen]   = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+
+  const handleChatOpen = () => { setChatOpen(true); setChatUnread(0); };
   const navigate  = useNavigate();
   const location  = useLocation();
   const { user, clearAuth } = useAuthStore();
@@ -215,8 +226,53 @@ export default function AppLayout() {
           </Space>
 
           <Space size={isMobile ? 12 : 20}>
+            {/* AI Chat trigger — Craze AI style */}
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={handleChatOpen}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '0 14px 0 6px', height: 36, borderRadius: 20,
+                  border: chatOpen ? 'none' : '1.5px solid #e2e8f0',
+                  cursor: 'pointer',
+                  background: chatOpen ? 'linear-gradient(135deg,#667eea,#764ba2)' : '#fff',
+                  boxShadow: chatOpen ? '0 2px 10px rgba(102,126,234,0.35)' : '0 1px 4px rgba(0,0,0,0.06)',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { if (!chatOpen) { e.currentTarget.style.borderColor = '#667eea'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(102,126,234,0.2)'; }}}
+                onMouseLeave={(e) => { if (!chatOpen) { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'; }}}
+              >
+                {/* Circle icon */}
+                <span style={{
+                  width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+                  background: chatOpen ? 'rgba(255,255,255,0.25)' : 'linear-gradient(135deg,#667eea,#764ba2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <RobotOutlined style={{ fontSize: 13, color: '#fff' }} />
+                </span>
+                {/* Label */}
+                <span style={{
+                  fontSize: 13, fontWeight: 600,
+                  color: chatOpen ? '#fff' : '#374151',
+                  whiteSpace: 'nowrap',
+                }}>
+                  Gamyam AI
+                </span>
+              </button>
+              {chatUnread > 0 && (
+                <span style={{
+                  position: 'absolute', top: -4, right: -4,
+                  background: '#ef4444', color: '#fff', borderRadius: '50%',
+                  width: 16, height: 16, fontSize: 9, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: '2px solid #fff',
+                }}>{chatUnread}</span>
+              )}
+            </div>
+
             <div style={{ marginTop: 6 }}><NotificationBell /></div>
-            <Dropdown menu={userMenu} placement="bottomRight">
+
+            <Dropdown menu={userMenu} placement="bottomRight" trigger={['click']}>
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar size={isMobile ? 36 : 44} src={avatarSrc || undefined} style={{ background: '#1677ff', flexShrink: 0 }}>
                   {!avatarSrc && initials}
@@ -227,7 +283,7 @@ export default function AppLayout() {
                       fontWeight: 600, fontSize: 17, color: '#262626',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.4,
                     }}>
-                      {user.display_name?.trim() || [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ')}
+                      {user.display_name || [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ')}
                     </span>
                     <span style={{ fontSize: 14, color: '#8c8c8c', lineHeight: 1.4 }}>
                       {ROLE_LABEL[user.role]}
@@ -247,6 +303,9 @@ export default function AppLayout() {
           <Outlet />
         </Content>
         <FeedbackButton open={reportOpen} onClose={() => setReportOpen(false)} />
+        {location.pathname !== '/chat' && (
+          <ChatWidget open={chatOpen} onClose={() => setChatOpen(false)} onNewUnread={() => setChatUnread((n) => n + 1)} />
+        )}
       </Layout>
     </Layout>
   );

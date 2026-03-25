@@ -22,7 +22,6 @@ urlpatterns = [
     path('api/v1/cycles/',        include('apps.review_cycles.urls')),
     path('api/v1/tasks/',         include('apps.reviewer_workflow.urls')),
     path('api/v1/feedback/',      include('apps.feedback.urls')),
-    path('api/v1/reports/',       include('apps.feedback.urls')),
     path('api/v1/dashboard/',     include('apps.dashboard.urls')),
     path('api/v1/notifications/', include('apps.notifications.urls')),
     path('api/v1/audit/',         include('apps.audit.urls')),

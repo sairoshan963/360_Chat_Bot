@@ -69,7 +69,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
                 manager = User.objects.get(id=manager_id)
                 OrgHierarchy.objects.update_or_create(employee=user, defaults={'manager': manager})
             except User.DoesNotExist:
-                pass
+                raise serializers.ValidationError({'manager_id': 'Manager not found'})
 
         return user
 
@@ -98,7 +98,7 @@ class UpdateUserSerializer(serializers.ModelSerializer):
                     manager = User.objects.get(id=manager_id)
                     OrgHierarchy.objects.update_or_create(employee=instance, defaults={'manager': manager})
                 except User.DoesNotExist:
-                    pass
+                    raise serializers.ValidationError({'manager_id': 'Manager not found'})
 
         return instance
 

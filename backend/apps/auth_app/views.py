@@ -1,20 +1,18 @@
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
 import requests as http_requests
 from django.conf import settings
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from google.auth.transport.requests import Request
+from google.oauth2 import id_token
+import logging
 
-
-class LoginRateThrottle(AnonRateThrottle):
-    scope = 'login'
-
-
-class PasswordResetRateThrottle(AnonRateThrottle):
-    scope = 'password_reset'
+logger = logging.getLogger(__name__)
 
 from . import services
 from .serializers import (
@@ -30,9 +28,9 @@ from .serializers import (
 
 # ─── Login ────────────────────────────────────────────────────────────────────
 
+@method_decorator(ratelimit(key='ip', rate='5/m', method='POST', block=True), name='post')
 class LoginView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes   = [LoginRateThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -74,38 +72,43 @@ class GoogleAuthView(APIView):
         serializer.is_valid(raise_exception=True)
         code = serializer.validated_data['code']
 
-        # Exchange code for tokens with Google
         redirect_uri = f'{settings.FRONTEND_URL}/auth/callback'
         client_id    = settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['client_id']
+        client_secret = settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['secret']
 
-        token_resp = http_requests.post('https://oauth2.googleapis.com/token', data={
-            'code':          code,
-            'client_id':     client_id,
-            'client_secret': settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['secret'],
-            'redirect_uri':  redirect_uri,
-            'grant_type':    'authorization_code',
-        })
+        try:
+            token_resp = http_requests.post('https://oauth2.googleapis.com/token', data={
+                'code':          code,
+                'client_id':     client_id,
+                'client_secret': client_secret,
+                'redirect_uri':  redirect_uri,
+                'grant_type':    'authorization_code',
+            }, timeout=10)
+        except http_requests.Timeout:
+            logger.error('Google OAuth token endpoint timeout')
+            return Response({'success': False, 'error': 'Google authentication timeout'}, status=503)
+        except Exception as e:
+            logger.error(f'Google OAuth request failed: {str(e)}')
+            return Response({'success': False, 'error': 'Google authentication failed'}, status=400)
 
         if not token_resp.ok:
-            error_detail = token_resp.json().get('error_description') or token_resp.json().get('error') or 'Failed to exchange Google code'
+            try:
+                error_data = token_resp.json()
+                error_detail = error_data.get('error_description') or error_data.get('error') or 'Failed to exchange Google code'
+            except (ValueError, AttributeError):
+                error_detail = f'Google OAuth failed with status {token_resp.status_code}'
+            logger.warning(f'Google OAuth code exchange failed: {error_detail}')
             return Response({'success': False, 'error': error_detail}, status=400)
 
-        id_token = token_resp.json().get('id_token')
-        if not id_token:
+        id_token_str = token_resp.json().get('id_token')
+        if not id_token_str:
+            logger.error('No id_token in Google response')
             return Response({'success': False, 'error': 'No id_token in Google response'}, status=400)
 
-        # Verify the ID token
-        verify_resp = http_requests.get(
-            f'https://oauth2.googleapis.com/tokeninfo?id_token={id_token}'
-        )
-        if not verify_resp.ok:
-            return Response({'success': False, 'error': 'Invalid Google token'}, status=400)
-
-        profile = verify_resp.json()
-
-        # Verify the token was issued for our app (prevent token injection from other Google apps)
-        expected_aud = settings.SOCIALACCOUNT_PROVIDERS['google']['APP']['client_id']
-        if profile.get('aud') != expected_aud:
+        try:
+            profile = id_token.verify_oauth2_token(id_token_str, Request(), client_id)
+        except Exception as e:
+            logger.error(f'Google ID token verification failed: {str(e)}')
             return Response({'success': False, 'error': 'Invalid Google token'}, status=400)
 
         result = services.login_with_google(
@@ -113,6 +116,7 @@ class GoogleAuthView(APIView):
             given_name=profile.get('given_name', ''),
             family_name=profile.get('family_name', ''),
         )
+        logger.info(f'User {profile.get("email")} logged in via Google')
         return Response({'success': True, **result})
 
 
@@ -139,7 +143,6 @@ class UpdateProfileView(APIView):
             serializer.validated_data['first_name'],
             serializer.validated_data.get('middle_name') or '',
             serializer.validated_data['last_name'],
-            serializer.validated_data.get('display_name') or '',
             serializer.validated_data.get('job_title', ''),
         )
         return Response({'success': True, 'user': UserMeSerializer(user).data})
@@ -158,10 +161,6 @@ class ChangePasswordView(APIView):
             serializer.validated_data['current_password'],
             serializer.validated_data['new_password'],
         )
-        from apps.audit.models import AuditLog
-        AuditLog.log(actor=request.user, action='CHANGE_PASSWORD',
-                     entity_type='user', entity_id=request.user.id,
-                     new_value={'changed_by': 'self'})
         return Response({'success': True, 'message': 'Password updated successfully'})
 
 
@@ -182,19 +181,15 @@ class AvatarUploadView(APIView):
         if ext not in allowed:
             return Response({'success': False, 'error': 'Only JPG, PNG, WEBP allowed'}, status=400)
 
-        MAX_SIZE = 5 * 1024 * 1024  # 5 MB
-        if image.size > MAX_SIZE:
-            return Response({'success': False, 'error': 'Avatar file too large. Maximum size is 5 MB.'}, status=400)
-
         url = services.upload_avatar(request.user, image)
         return Response({'success': True, 'avatar_url': url})
 
 
 # ─── Forgot Password ──────────────────────────────────────────────────────────
 
+@method_decorator(ratelimit(key='ip', rate='3/h', method='POST', block=True), name='post')
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes   = [PasswordResetRateThrottle]
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)

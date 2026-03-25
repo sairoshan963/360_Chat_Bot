@@ -86,13 +86,14 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR('Expected JSON array'))
             return
 
-        # Build id → email for manager resolution
+        # Build basic_employment.id → email for manager resolution
+        # (reporting_to_id references basic_employment.id, NOT top-level id)
         id_to_email = {}
         for item in data:
-            uid = get(item, 'id')
+            emp_id = get(item, 'basic_employment', 'id')
             email = (get(item, 'email') or '').strip().lower()
-            if uid and email:
-                id_to_email[str(uid).strip()] = email
+            if emp_id and email:
+                id_to_email[str(emp_id).strip()] = email
 
         # Collect unique department names
         dept_names = set()
