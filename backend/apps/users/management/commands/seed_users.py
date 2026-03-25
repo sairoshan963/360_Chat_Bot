@@ -14,31 +14,11 @@ User = get_user_model()
 SEED_PASSWORD = 'Admin@123'
 
 USERS = [
-    {'email': 'admin@gamyam.com',        'first_name': 'Super',    'last_name': 'Admin',    'role': 'SUPER_ADMIN', 'job_title': 'Chief Executive Officer', 'department': None},
-    {'email': 'roshan.neelam@gamyam.co', 'first_name': 'Roshan',   'last_name': 'Neelam',   'role': 'SUPER_ADMIN', 'job_title': 'Developer',                'department': None},
-    {'email': 'hr@gamyam.com',           'first_name': 'Sarah',    'last_name': 'Johnson',  'role': 'HR_ADMIN',    'job_title': 'HR Manager',               'department': 'HR'},
-    {'email': 'manager1@gamyam.com',     'first_name': 'John',     'last_name': 'Smith',    'role': 'MANAGER',     'job_title': 'Engineering Manager',      'department': 'Engineering'},
-    {'email': 'manager2@gamyam.com',     'first_name': 'Emily',    'last_name': 'Davis',    'role': 'MANAGER',     'job_title': 'Product Manager',          'department': 'Product'},
-    {'email': 'emp1@gamyam.com',         'first_name': 'Michael',  'last_name': 'Brown',    'role': 'EMPLOYEE',    'job_title': 'Senior Software Engineer', 'department': 'Engineering'},
-    {'email': 'emp2@gamyam.com',         'first_name': 'Jessica',  'last_name': 'Wilson',   'role': 'EMPLOYEE',    'job_title': 'Software Engineer',        'department': 'Engineering'},
-    {'email': 'emp3@gamyam.com',         'first_name': 'David',    'last_name': 'Martinez', 'role': 'EMPLOYEE',    'job_title': 'Frontend Developer',       'department': 'Engineering'},
-    {'email': 'emp4@gamyam.com',         'first_name': 'Lisa',     'last_name': 'Anderson', 'role': 'EMPLOYEE',    'job_title': 'Backend Developer',        'department': 'Product'},
-    {'email': 'emp5@gamyam.com',         'first_name': 'Robert',   'last_name': 'Taylor',   'role': 'EMPLOYEE',    'job_title': 'QA Engineer',              'department': 'QA'},
-    {'email': 'emp6@gamyam.com',         'first_name': 'Jennifer', 'last_name': 'Thomas',   'role': 'EMPLOYEE',    'job_title': 'DevOps Engineer',          'department': 'DevOps'},
+    # Only the system super-admin account is seeded — all real employees are imported via CSV
+    {'email': 'admin@gamyam.com', 'first_name': 'Super', 'last_name': 'Admin', 'role': 'SUPER_ADMIN', 'job_title': 'System Administrator', 'department': None},
 ]
 
-# (employee_email, manager_email or None)
-ORG_HIERARCHY = [
-    ('hr@gamyam.com',       None),
-    ('manager1@gamyam.com', None),
-    ('manager2@gamyam.com', None),
-    ('emp1@gamyam.com',     'manager1@gamyam.com'),
-    ('emp2@gamyam.com',     'manager1@gamyam.com'),
-    ('emp3@gamyam.com',     'manager1@gamyam.com'),
-    ('emp4@gamyam.com',     'manager2@gamyam.com'),
-    ('emp5@gamyam.com',     'manager2@gamyam.com'),
-    ('emp6@gamyam.com',     'manager1@gamyam.com'),
-]
+ORG_HIERARCHY = []
 
 # Single template: easy questions for self, manager, and peer
 TEMPLATE_SIMPLE = {
@@ -158,7 +138,7 @@ class Command(BaseCommand):
         from apps.review_cycles.models import Template, TemplateSection, TemplateQuestion
 
         self.stdout.write('\nSeeding templates...')
-        hr_user = User.objects.filter(email='hr@gamyam.com').first()
+        hr_user = User.objects.filter(email='admin@gamyam.com').first()
 
         for template_data in (TEMPLATE_SIMPLE,):  # only one template: Simple 360° Review
             template, created = Template.objects.get_or_create(
