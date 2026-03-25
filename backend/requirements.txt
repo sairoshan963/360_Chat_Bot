@@ -76,8 +76,8 @@ google-auth==2.38.0
 google-auth-oauthlib==1.2.2
 google-auth-httplib2==0.2.0
 cachetools==5.5.2
-pyasn1==0.7.0
-pyasn1-modules==0.4.2
+pyasn1==0.6.1
+pyasn1-modules==0.4.1
 rsa==4.9.1
 
 # ─── Security ────────────────────────────────────────────────────────────────
