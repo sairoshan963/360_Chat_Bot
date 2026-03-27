@@ -114,7 +114,7 @@ services:
         VITE_USE_MOCK: "false"
     restart: unless-stopped
     ports:
-      - "5174:80"
+      - "6000:80"
     depends_on:
       - backend
 
