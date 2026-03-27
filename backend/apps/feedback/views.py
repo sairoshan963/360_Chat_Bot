@@ -105,7 +105,7 @@ class ExportAllReportsView(APIView):
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def get(self, request, cycle_id):
-        buffer = services.export_all_reports_excel(cycle_id, request.user)
+        buffer, _ = services.export_all_reports_excel(cycle_id, request.user)
 
         from apps.review_cycles.models import ReviewCycle
         try:

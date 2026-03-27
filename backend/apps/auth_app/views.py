@@ -143,6 +143,7 @@ class UpdateProfileView(APIView):
             serializer.validated_data['first_name'],
             serializer.validated_data.get('middle_name') or '',
             serializer.validated_data['last_name'],
+            serializer.validated_data.get('display_name') or '',
             serializer.validated_data.get('job_title', ''),
         )
         return Response({'success': True, 'user': UserMeSerializer(user).data})

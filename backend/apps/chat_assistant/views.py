@@ -458,10 +458,6 @@ def _run_pipeline(user, message, display_message, session_id):
         _ctx = data_context_fetcher.fetch_context(user, message)
         if _ctx:
             logger.debug("  DATA CTX  : early bypass — context types=%s", list(_ctx.keys()))
-            chat_logger.log_interaction(
-                user, session_id, display_message or message,
-                'data_analysis', {}, 'clarify', '', True, response_data={},
-            )
             return {
                 "_llm_needed":       True,
                 "_data_analysis":    True,
@@ -609,74 +605,73 @@ def _run_pipeline(user, message, display_message, session_id):
     # Unknown intent — signal caller to generate LLM response (streaming or sync)
     if not is_known_intent(intent):
 
-        # ── Phase 4: Data Context fallback (catches broader data questions) ────
-        _user_role = getattr(user, 'role', '')
-        if _user_role in ('SUPER_ADMIN', 'HR_ADMIN') and \
-                data_context_fetcher.is_data_analysis_question(message):
-            _ctx = data_context_fetcher.fetch_context(user, message)
-            if _ctx:
-                logger.debug("  DATA CTX : fallback — context types=%s", list(_ctx.keys()))
-                return {
-                    "_llm_needed":       True,
-                    "_data_analysis":    True,
-                    "_llm_user_message": message,
-                    "_llm_system_data":  _ctx,
-                    "_llm_fallback":     "I was unable to analyze the data at this time. Please try again.",
-                    "_log_user":         user,
-                    "_log_session":      session_id,
-                    "_log_display":      display_message,
-                    "_log_used_llm":     True,
-                    "session_id":        session_id,
-                    "intent":            "data_analysis",
-                    "status":            "clarify",
-                    "data":              {},
-                    "needs_input":       False,
-                }
-        # ── End Phase 4 ────────────────────────────────────────────────────────
+        # ── Agent: data / analytics questions (replaces Phase 4 fallback) ─────
+        # Phase 4 early bypass (strong questions) already ran above.
+        # For broader data questions that reached here, route to the tool-calling
+        # agent instead of pre-fetching a fixed context snapshot.
+        from .agent_tools import is_agent_question, is_employee_self_query
 
-        _fallback_default = (
-            "I didn't quite understand that. Here are things I can help with:\n\n"
-            "📊 For everyone:\n"
-            "• Show my feedback • Show my tasks • Show my cycles\n"
-            "• Show my nominations • Show cycle deadlines • Show announcements\n\n"
-            "👥 For managers:\n"
-            "• Show team summary • Show team nominations • Show pending reviews\n"
-            "• Approve nomination • Reject nomination\n\n"
-            "📋 For HR admins:\n"
-            "• Show cycle status • Show participation stats • Show employees\n"
-            "• Show templates • Create a cycle • Create a template\n"
-            "• Activate cycle • Close cycle • Release results • Cancel a cycle\n"
-            "• Approve nomination • Reject nomination\n\n"
-            "🔍 For super admins:\n"
-            "• Show audit logs\n\n"
-            "🤝 Actions:\n"
-            "• Nominate peers\n\n"
-            "Try rephrasing, or tap one of the suggestions below."
+        # EMPLOYEE: limited self-scoped agent for natural-language self queries
+        if _user_role == 'EMPLOYEE' and is_employee_self_query(message):
+            logger.debug("  AGENT   : routing EMPLOYEE to self-scoped agent")
+            return {
+                "_agent_needed":       True,
+                "_agent_message":      message,
+                "_agent_employee_mode": True,
+                "_log_user":           user,
+                "_log_session":        session_id,
+                "_log_display":        display_message,
+                "session_id":          session_id,
+                "intent":              "agent_query",
+                "status":              "clarify",
+                "data":                {},
+                "needs_input":         False,
+            }
+
+        # SUPER_ADMIN / HR_ADMIN / MANAGER: full or team-scoped agent
+        if _user_role in ('SUPER_ADMIN', 'HR_ADMIN', 'MANAGER') and (
+            is_agent_question(message) or data_context_fetcher.is_data_analysis_question(message)
+        ):
+            logger.debug("  AGENT   : routing to tool-calling agent")
+            return {
+                "_agent_needed":  True,
+                "_agent_message": message,
+                "_log_user":      user,
+                "_log_session":   session_id,
+                "_log_display":   display_message,
+                "session_id":     session_id,
+                "intent":         "agent_query",
+                "status":         "clarify",
+                "data":           {},
+                "needs_input":    False,
+            }
+
+        # ── Out-of-scope: question is not related to the 360 system ──────────
+        _role_hints = {
+            'EMPLOYEE':    "your tasks, feedback, nominations, and cycles",
+            'MANAGER':     "your team's nominations, pending reviews, and cycle summaries",
+            'HR_ADMIN':    "cycles, participation stats, templates, employees, and analytics",
+            'SUPER_ADMIN': "cycles, employees, analytics, audit logs, and org overview",
+        }
+        _hint = _role_hints.get(_user_role, "the 360° feedback system")
+        out_of_scope_msg = (
+            f"I'm Gamyam AI, specialized for your 360° feedback system. "
+            f"I can help you with {_hint}.\n\n"
+            "I'm not able to answer questions outside that scope. "
+            "What would you like to know about your feedback system?"
+        )
+        chat_logger.log_interaction(
+            user, session_id, display_message or message,
+            'out_of_scope', {}, 'clarify', out_of_scope_msg, False,
+            response_data={},
         )
         return {
-            "_llm_needed":       True,
-            "_llm_user_message": message,
-            "_llm_system_data":  {
-                "situation": "User message was not recognized as a supported command.",
-                "user_role": getattr(user, 'role', 'unknown'),
-                "supported_commands": list(COMMAND_REGISTRY.keys()),
-                "instruction": (
-                    "Acknowledge the user's message politely. "
-                    "Suggest 2–3 commands from supported_commands that are most relevant "
-                    "to what the user seems to want. Keep the response short (3–5 lines). "
-                    "Do not reveal internal system details."
-                ),
-            },
-            "_llm_fallback":  _fallback_default,
-            "_log_user":      user,
-            "_log_session":   session_id,
-            "_log_display":   display_message,
-            "_log_used_llm":  used_llm,
-            "session_id":     session_id,
-            "intent":         "unknown",
-            "status":         "clarify",
-            "data":           {},
-            "needs_input":    False,
+            "session_id":  session_id,
+            "intent":      "out_of_scope",
+            "status":      "clarify",
+            "message":     out_of_scope_msg,
+            "data":        {},
+            "needs_input": False,
         }
 
     # ── PIPELINE STAGE 5: Command selection + permission check ───────────
@@ -1246,7 +1241,57 @@ class ChatStreamView(APIView):
         if is_new_session:
             chat_logger.maybe_generate_title(session_id, display_message or message)
 
-        if payload.get("_pdf_needed"):
+        if payload.get("_agent_needed"):
+            # ── Level-2 tool-calling agent ─────────────────────────────────────
+            agent_message   = payload.pop("_agent_message")
+            employee_mode   = payload.pop("_agent_employee_mode", False)
+            log_user        = payload.pop("_log_user")
+            log_session     = payload.pop("_log_session")
+            log_display     = payload.pop("_log_display")
+            payload.pop("_agent_needed")
+
+            if employee_mode:
+                from .agent_tools import EMPLOYEE_TOOL_DEFINITIONS
+                _agent_tools = EMPLOYEE_TOOL_DEFINITIONS
+            else:
+                _agent_tools = None  # uses default TOOL_DEFINITIONS
+
+            def stream_agent():
+                # Emit immediately so user sees activity while agent runs tools
+                yield _sse({"type": "chunk", "text": "Analyzing your data...\n\n"})
+                try:
+                    response = llm_service.run_agent_loop(
+                        agent_message,
+                        getattr(user, 'role', ''),
+                        user,
+                        tool_definitions=_agent_tools,
+                    )
+                except Exception:
+                    response = "I was unable to complete the analysis. Please try again."
+                finally:
+                    session_manager.release_lock(str(user.id))
+
+                chat_logger.log_interaction(
+                    log_user, log_session, log_display or agent_message,
+                    'agent_query', {}, 'success', response, True, response_data={},
+                )
+                session_manager.append_chat_history(str(user.id), 'assistant', response)
+
+                # Stream the response word-by-word for a natural feel
+                words = response.split(' ')
+                for i, word in enumerate(words):
+                    yield _sse({"type": "chunk", "text": word + (' ' if i < len(words) - 1 else '')})
+
+                payload["message"] = response
+                payload["status"]  = "success"
+                sugg = llm_service.generate_suggestions(agent_message, getattr(user, 'role', ''))
+                if sugg:
+                    payload['suggestions'] = sugg
+                yield _sse({"type": "done", **payload})
+
+            resp = StreamingHttpResponse(stream_agent(), content_type="text/event-stream")
+
+        elif payload.get("_pdf_needed"):
             # ── PDF → Template LLM conversation ───────────────────────────────
             pdf_text         = payload.pop("_pdf_text")
             pdf_history      = payload.pop("_pdf_history")
@@ -1425,6 +1470,14 @@ class ChatStreamView(APIView):
                 # "I didn't quite understand that" clarify override.
                 if is_data_analysis:
                     payload["status"] = "success"
+                # LLM suggestions: generate contextual follow-ups for data analysis
+                if is_data_analysis:
+                    sugg = llm_service.generate_suggestions(
+                        log_display or message,
+                        getattr(user, 'role', 'SUPER_ADMIN'),
+                    )
+                    if sugg:
+                        payload['suggestions'] = sugg
                 yield _sse({"type": "done", **payload})
 
             resp = StreamingHttpResponse(stream_llm(), content_type="text/event-stream")
@@ -1434,6 +1487,13 @@ class ChatStreamView(APIView):
             # Phase 3: save bot response to conversation history
             if payload.get("message"):
                 session_manager.append_chat_history(str(user.id), 'assistant', payload["message"])
+
+            # Attach contextual next-step suggestions for successful commands
+            if payload.get('status') == 'success':
+                from .suggestions import get_intent_suggestions
+                sugg = get_intent_suggestions(payload.get('intent', ''))
+                if sugg:
+                    payload['suggestions'] = sugg
 
             def stream_done():
                 yield _sse({"type": "done", **payload})

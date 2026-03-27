@@ -942,6 +942,132 @@ def generate_response(user_message: str, system_data: dict) -> str:
         return "I was unable to generate a response. Please try again."
 
 
+def generate_suggestions(question: str, user_role: str) -> list[str]:
+    """
+    Generate 3 contextual follow-up suggestions after a data analysis response.
+    Used for open-ended LLM questions (Option B of the hybrid approach).
+    Returns a list of up to 3 short command/question strings, or [] on failure.
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return []
+
+    prompt = (
+        f'A user with role "{user_role}" in an HR 360° feedback system just asked:\n'
+        f'"{question}"\n\n'
+        'Generate exactly 3 short follow-up questions or commands they would naturally '
+        'want to ask next. Keep each under 8 words. Make them specific to HR analytics, '
+        '360 feedback, or org insights.\n'
+        'Return ONLY a JSON array of 3 strings, nothing else.\n'
+        'Example: ["Who are the top performers?", "Show participation stats", '
+        '"Which department scores highest?"]'
+    )
+    try:
+        response = requests.post(
+            COHERE_API_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": COHERE_MODEL, "messages": [{"role": "user", "content": prompt}]},
+            timeout=6,
+        )
+        response.raise_for_status()
+        text = response.json()["message"]["content"][0]["text"].strip()
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
+        if match:
+            items = json.loads(match.group())
+            return [s.strip() for s in items if isinstance(s, str)][:3]
+    except Exception as e:
+        logger.warning("Suggestion generation failed: %s", e)
+    return []
+
+
+def run_agent_loop(user_message: str, user_role: str, user_obj,
+                   max_iterations: int = 4, tool_definitions=None) -> str:
+    """
+    Level-2 tool-calling agent loop.
+    The LLM decides which read-only tools to call, gets results back,
+    and synthesises a final answer. Loops up to max_iterations times.
+    Returns the final text response string.
+    """
+    from .agent_tools import TOOL_DEFINITIONS, execute_tool
+    if tool_definitions is None:
+        tool_definitions = TOOL_DEFINITIONS
+
+    api_key = _get_api_key()
+    if not api_key:
+        return "I was unable to process your request. Please try again."
+
+    _scope_note = (
+        " The tools only return data for the current user themselves. Never reference other people's data."
+        if user_role == 'EMPLOYEE' else
+        " You can only see data for your direct reports — all tools are automatically scoped to your team."
+        if user_role == 'MANAGER' else
+        " You have full org-wide access."
+        if user_role in ('SUPER_ADMIN', 'HR_ADMIN') else ""
+    )
+    system_prompt = (
+        f"You are Gamyam AI, an assistant for an HR 360° feedback system. "
+        f"The user's role is: {user_role}.{_scope_note} "
+        "Answer their question by calling the available tools to fetch the data you need. "
+        "Be concise and use real numbers and names from the data. "
+        "Never make up data — only use what the tools return. "
+        "If the tools return no data, say so clearly. "
+        "Do not include the raw 'Analyzing your data...' prefix in your response."
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_message},
+    ]
+
+    for _ in range(max_iterations):
+        try:
+            resp = requests.post(
+                COHERE_API_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": COHERE_MODEL, "messages": messages, "tools": tool_definitions},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            msg        = resp.json().get("message", {})
+            tool_calls = msg.get("tool_calls") or []
+
+            # No tool calls → LLM has enough data, extract final answer
+            if not tool_calls:
+                for item in (msg.get("content") or []):
+                    if item.get("type") == "text":
+                        return item.get("text", "").strip()
+                return "I was unable to generate a response."
+
+            # Add assistant turn (with tool_calls) to conversation
+            messages.append({
+                "role":       "assistant",
+                "tool_calls": tool_calls,
+                "content":    msg.get("content") or [],
+            })
+
+            # Execute each tool call and feed results back
+            for tc in tool_calls:
+                fn        = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                try:
+                    tool_args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+
+                result = execute_tool(tool_name, tool_args, user_obj)
+                messages.append({
+                    "role":         "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content":      result,
+                })
+
+        except Exception as e:
+            logger.error("Agent loop error: %s", e)
+            break
+
+    return "I was unable to complete the analysis. Please try again."
+
+
 def generate_response_stream(user_message: str, system_data: dict):
     """
     Yield text chunks from Cohere's streaming API.

@@ -1192,13 +1192,17 @@ function CapabilitiesPanel({ role, onClose }) {
 }
 
 /* ─── getSuggestions helper ─────────────────────────────────────────────────── */
-function getSuggestions(data) {
-  if (!data) return ['Show announcements', 'Show my tasks'];
-  if (data.profile)    return ['Show my manager', 'Show my cycles', 'Show my tasks'];
-  if (data.cycles)     return ['Show cycle deadlines', 'Show participation stats'];
+// backendSuggestions: array from the SSE done event (set by backend per-intent or LLM)
+// data: the structured data payload — used only as a fallback when backend sends nothing
+function getSuggestions(backendSuggestions, data) {
+  if (backendSuggestions?.length) return backendSuggestions;
+  // Legacy fallback — keeps suggestions working for any edge case not yet covered
+  if (!data) return [];
+  if (data.profile)     return ['Show my manager', 'Show my cycles', 'Show my tasks'];
+  if (data.cycles)      return ['Show cycle deadlines', 'Show participation stats'];
   if (data.nominations) return ['Show my cycles', 'Show pending reviews'];
-  if (data.tasks)      return ['Show my feedback', 'Show my report'];
-  return ['Show announcements', 'Show my tasks'];
+  if (data.tasks)       return ['Show my feedback', 'Show my report'];
+  return [];
 }
 
 /* ─── Main chat page ────────────────────────────────────────────────────────── */
@@ -1231,6 +1235,7 @@ export default function ChatPage() {
   const fileInputRef  = useRef(null);
   const retryCountRef = useRef(0);
   const bcRef         = useRef(null);   // BroadcastChannel for cross-tab sync
+  const isSendingRef  = useRef(false);  // Immediate guard against double-send
 
   // Cross-tab sync: listen for messages sent in ChatWidget and reload if same session
   useEffect(() => {
@@ -1361,7 +1366,8 @@ export default function ChatPage() {
     const isPick = text && typeof text === 'object' && text.id;
     const msg    = isPick ? text.id : (text || input).trim();
     const label  = displayOverride || (isPick ? text.label : msg);
-    if (!msg || loading) return;
+    if (!msg || loading || isSendingRef.current) return;
+    isSendingRef.current = true;
     setInput('');
     inputRef.current?.focus();
     if (!displayOverride) addMessage('user', label);
@@ -1411,7 +1417,7 @@ export default function ChatPage() {
                     text:        data.message || last.text,
                     status:      data.status,
                     data:        data.data || {},
-                    suggestions: data.status === 'success' ? getSuggestions(data.data) : undefined,
+                    suggestions: data.status === 'success' ? getSuggestions(data.suggestions, data.data) : undefined,
                   };
                   return upd;
                 });
@@ -1419,7 +1425,7 @@ export default function ChatPage() {
                 addMessage('assistant', data.message, {
                   status:      data.status,
                   data:        data.data || {},
-                  suggestions: data.status === 'success' ? getSuggestions(data.data) : undefined,
+                  suggestions: data.status === 'success' ? getSuggestions(data.suggestions, data.data) : undefined,
                 });
               }
               return false;
@@ -1465,7 +1471,11 @@ export default function ChatPage() {
       }
     };
 
-    await attemptSend();
+    try {
+      await attemptSend();
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
   const handleConfirm = async (confirmed) => {

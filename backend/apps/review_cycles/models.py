@@ -135,13 +135,15 @@ class ReviewCycle(models.Model):
         return f'{self.name} [{self.state}]'
 
     def save(self, *args, **kwargs):
-        # Validate state transitions
-        if self.pk:  # Only validate on update, not on create
-            old_instance = ReviewCycle.objects.get(pk=self.pk)
-            if old_instance.state != self.state:
-                if self.state not in self.VALID_TRANSITIONS.get(old_instance.state, []):
-                    from django.core.exceptions import ValidationError
-                    raise ValidationError(f'Cannot transition from {old_instance.state} to {self.state}')
+        # Validate state transitions — skip the DB query when state isn't in the updated fields
+        if self.pk:
+            update_fields = kwargs.get('update_fields')
+            if update_fields is None or 'state' in update_fields:
+                old_instance = ReviewCycle.objects.get(pk=self.pk)
+                if old_instance.state != self.state:
+                    if self.state not in self.VALID_TRANSITIONS.get(old_instance.state, []):
+                        from django.core.exceptions import ValidationError
+                        raise ValidationError(f'Cannot transition from {old_instance.state} to {self.state}')
         super().save(*args, **kwargs)
 
 

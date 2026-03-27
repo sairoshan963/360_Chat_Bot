@@ -154,9 +154,9 @@ def update_template(template_id, name, sections, actor):
     except Template.DoesNotExist:
         raise NotFound('Template not found')
 
-    # Cannot edit if used by an active/finalized cycle
+    # Cannot edit if used by any non-DRAFT cycle
     if ReviewCycle.objects.filter(template=template).exclude(state='DRAFT').exists():
-        raise ValidationError('Template is used by an active or finalized cycle and cannot be edited')
+        raise ValidationError('Template is used by a cycle that is not in DRAFT state and cannot be edited')
 
     with transaction.atomic():
         template.name = name.strip()
@@ -218,10 +218,6 @@ def create_cycle(data, actor):
     if not template_id:    raise ValidationError('template_id is required')
     if not review_deadline: raise ValidationError('review_deadline is required')
 
-    from apps.review_cycles.models import ReviewCycle as _RC
-    if _RC.objects.filter(name__iexact=name).exists():
-        raise ValidationError('Cycle with this name already exists')
-
     try:
         template = Template.objects.get(id=template_id, is_active=True)
     except Template.DoesNotExist:
@@ -250,24 +246,30 @@ def create_cycle(data, actor):
         if val and val not in valid_anonymity:
             raise ValidationError(f'Invalid {field} value')
 
-    cycle = ReviewCycle.objects.create(
-        name=name,
-        description=data.get('description') or None,
-        template=template,
-        peer_enabled=peer_enabled,
-        peer_min_count=data.get('peer_min_count') or None,
-        peer_max_count=data.get('peer_max_count') or None,
-        peer_threshold=data.get('peer_threshold') or 3,
-        peer_anonymity=data.get('peer_anonymity') or 'ANONYMOUS',
-        manager_anonymity=data.get('manager_anonymity') or 'TRANSPARENT',
-        self_anonymity=data.get('self_anonymity') or 'TRANSPARENT',
-        nomination_deadline=data.get('nomination_deadline') or None,
-        review_deadline=review_deadline,
-        quarter=data.get('quarter') or None,
-        quarter_year=data.get('quarter_year') or None,
-        nomination_approval_mode=data.get('nomination_approval_mode') or 'AUTO',
-        created_by=actor,
-    )
+    with transaction.atomic():
+        # Lock any matching rows first so concurrent requests queue up here,
+        # preventing two requests from both passing the uniqueness check.
+        if ReviewCycle.objects.select_for_update().filter(name__iexact=name).exists():
+            raise ValidationError('Cycle with this name already exists')
+
+        cycle = ReviewCycle.objects.create(
+            name=name,
+            description=data.get('description') or None,
+            template=template,
+            peer_enabled=peer_enabled,
+            peer_min_count=data.get('peer_min_count') or None,
+            peer_max_count=data.get('peer_max_count') or None,
+            peer_threshold=data.get('peer_threshold') or 3,
+            peer_anonymity=data.get('peer_anonymity') or 'ANONYMOUS',
+            manager_anonymity=data.get('manager_anonymity') or 'TRANSPARENT',
+            self_anonymity=data.get('self_anonymity') or 'TRANSPARENT',
+            nomination_deadline=data.get('nomination_deadline') or None,
+            review_deadline=review_deadline,
+            quarter=data.get('quarter') or None,
+            quarter_year=data.get('quarter_year') or None,
+            nomination_approval_mode=data.get('nomination_approval_mode') or 'AUTO',
+            created_by=actor,
+        )
 
     participant_ids = data.get('participant_ids', [])
     if participant_ids:

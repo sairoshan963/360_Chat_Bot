@@ -216,9 +216,12 @@ class UserBulkImportView(APIView):
 
             manager_email = (row.get('manager_email') or '').strip().lower()
 
-            if User.objects.filter(email=email).exists():
-                # Update department if provided and not already set
+            try:
                 existing = User.objects.get(email=email)
+            except User.DoesNotExist:
+                existing = None
+
+            if existing is not None:
                 changed = False
                 if dept and not existing.department_id:
                     existing.department = dept

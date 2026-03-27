@@ -1464,13 +1464,14 @@ function CommandPalette({ role, onSelect, onClose }) {
 }
 
 /* ─── getSuggestions helper ─────────────────────────────────────────────────── */
-function getSuggestions(data) {
-  if (!data) return ['Show announcements', 'Show my tasks'];
-  if (data.profile)    return ['Show my manager', 'Show my cycles', 'Show my tasks'];
-  if (data.cycles)     return ['Show cycle deadlines', 'Show participation stats'];
+function getSuggestions(backendSuggestions, data) {
+  if (backendSuggestions?.length) return backendSuggestions;
+  if (!data) return [];
+  if (data.profile)     return ['Show my manager', 'Show my cycles', 'Show my tasks'];
+  if (data.cycles)      return ['Show cycle deadlines', 'Show participation stats'];
   if (data.nominations) return ['Show my cycles', 'Show pending reviews'];
-  if (data.tasks)      return ['Show my feedback', 'Show my report'];
-  return ['Show announcements', 'Show my tasks'];
+  if (data.tasks)       return ['Show my feedback', 'Show my report'];
+  return [];
 }
 
 /* ─── Chat Widget ───────────────────────────────────────────────────────────── */
@@ -1503,6 +1504,7 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
   const retryCountRef  = useRef(0);
   const bcRef          = useRef(null);   // BroadcastChannel for cross-tab sync
   const fileInputRef   = useRef(null);   // Hidden file input for PDF upload
+  const isSendingRef   = useRef(false);  // Immediate guard against double-send
 
   // Cross-tab sync: listen for messages sent in ChatPage and reload if same session
   useEffect(() => {
@@ -1782,7 +1784,8 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     const isPick = text && typeof text === 'object' && text.id;
     const msg    = isPick ? text.id : (text || input).trim();
     const label  = displayOverride || (isPick ? text.label : msg);
-    if (!msg || loading) return;
+    if (!msg || loading || isSendingRef.current) return;
+    isSendingRef.current = true;
     setInput('');
     setWaitingField(null);
     setRecoveryBanner(null);
@@ -1848,7 +1851,7 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
                       status:      data.status,
                       data:        data.data || {},
                       ts:          new Date().toISOString(),
-                      suggestions: data.status === 'success' ? getSuggestions(data.data) : undefined,
+                      suggestions: data.status === 'success' ? getSuggestions(data.suggestions, data.data) : undefined,
                     };
                   }
                   return updated;
@@ -1857,7 +1860,7 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
                 addMessage('assistant', data.message, {
                   status:      data.status,
                   data:        data.data || {},
-                  suggestions: data.status === 'success' ? getSuggestions(data.data) : undefined,
+                  suggestions: data.status === 'success' ? getSuggestions(data.suggestions, data.data) : undefined,
                 });
               }
               return false;
@@ -1911,7 +1914,11 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
       }
     };
 
-    await attemptSend();
+    try {
+      await attemptSend();
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
   const handleDirectAction = async (action, nominationId) => {
