@@ -25,6 +25,9 @@ const CAPABILITIES = {
       { icon: '🔄', text: 'Show cycles I am in' },
       { icon: '📅', text: 'Show upcoming deadlines' },
       { icon: '📢', text: 'Show announcements' },
+      { icon: '📝', text: 'Explain my results (AI narrative)' },
+      { icon: '💡', text: 'My strengths and weaknesses' },
+      { icon: '📈', text: 'Summarize my performance' },
     ],
     cannot: [
       { text: 'Fill feedback form', goto: 'My Tasks page' },
@@ -47,6 +50,9 @@ const CAPABILITIES = {
       { icon: '✔️', text: 'Show pending approvals' },
       { icon: '📊', text: 'Show cycle results' },
       { icon: '⬇', text: 'Export nominations' },
+      { icon: '🎯', text: 'Who needs coaching?' },
+      { icon: '⚖️', text: 'Show calibration issues (score gaps)' },
+      { icon: '📉', text: 'Show attrition risk (declining scores)' },
     ],
     cannot: [
       { text: 'Approve nominations', goto: 'Nominations page' },
@@ -72,6 +78,10 @@ const CAPABILITIES = {
       { icon: '✔️', text: 'Show pending approvals' },
       { icon: '📊', text: 'Show cycle results' },
       { icon: '⬇', text: 'Export nominations' },
+      { icon: '⚖️', text: 'Show calibration issues (score gaps)' },
+      { icon: '📉', text: 'Show attrition risk' },
+      { icon: '🎯', text: 'Coaching digest for my team' },
+      { icon: '🏅', text: 'Who is ready for promotion?' },
     ],
     cannot: [
       { text: 'Full cycle configuration', goto: 'Cycles page' },
@@ -102,6 +112,10 @@ const CAPABILITIES = {
       { icon: '📊', text: 'Show cycle results' },
       { icon: '⬇', text: 'Export nominations' },
       { icon: '🔔', text: 'Remind team' },
+      { icon: '⚖️', text: 'Show calibration issues (score gaps)' },
+      { icon: '📉', text: 'Show attrition risk' },
+      { icon: '🎯', text: 'Coaching digest for a team' },
+      { icon: '🏅', text: 'Who is ready for promotion?' },
     ],
     cannot: [
       { text: 'Manage users', goto: 'Admin → Users page' },
