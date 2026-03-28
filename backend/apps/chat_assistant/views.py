@@ -1327,6 +1327,9 @@ class ChatStreamView(APIView):
                 session_manager.append_chat_history(str(user.id), 'assistant', accumulated)
                 payload["message"] = accumulated
                 payload["status"]  = "success"
+                sugg = llm_service.generate_suggestions(ak_message, getattr(user, 'role', ''))
+                if sugg:
+                    payload['suggestions'] = sugg
                 yield _sse({"type": "done", **payload})
 
             resp = StreamingHttpResponse(stream_app_knowledge(), content_type="text/event-stream")

@@ -76,7 +76,7 @@
       changed_when: false
 
     - name: Show running containers
-      shell: docker ps --format "table {{ '{{.Names}}' }}\t{{ '{{.Status}}' }}\t{{ '{{.Ports}}' }}" | grep 360-django
+      shell: docker ps --format "table {{ '{{.Names}}' }}\t{{ '{{.Status}}' }}\t{{ '{{.Ports}}' }}" | grep gamyam360chat
       register: containers
 
     - name: Print container status
@@ -85,13 +85,13 @@
 
     - name: Verify frontend is responding
       uri:
-        url: "http://localhost:5173/"
+        url: "http://localhost:6000/"
         status_code: 200
       register: frontend_check
 
     - name: Verify backend API is responding
       uri:
-        url: "http://localhost:8000/api/v1/auth/login/"
+        url: "http://localhost:8001/api/v1/auth/login/"
         method: POST
         body_format: json
         body:
@@ -104,5 +104,5 @@
       debug:
         msg:
           - "✅ Deploy successful!"
-          - "Frontend: http://164.52.215.113:5173/"
-          - "Backend:  http://164.52.215.113:8000/"
+          - "Frontend: http://164.52.215.113:6000/"
+          - "Backend:  http://164.52.215.113:8001/"

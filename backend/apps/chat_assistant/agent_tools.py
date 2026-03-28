@@ -823,6 +823,8 @@ def is_followup_question(message: str, chat_history: list) -> bool:
     Return True if:
     1. The message contains reference words pointing to a previous response
     2. There is actual chat history to reference
+    3. Message is short enough to be a follow-up (not a new standalone question)
+    4. Message doesn't start with action verbs that signal a fresh command
 
     Used to route follow-up questions to the agent so it can use
     conversation history to answer contextually.
@@ -833,4 +835,22 @@ def is_followup_question(message: str, chat_history: list) -> bool:
     has_prev_response = any(e.get("role") == "assistant" for e in chat_history)
     if not has_prev_response:
         return False
+
+    words = message.strip().split()
+
+    # Too long → likely a new standalone question, not a follow-up
+    if len(words) > 20:
+        return False
+
+    # Starts with a fresh command verb → not a follow-up
+    # e.g. "show my tasks", "create a cycle", "the first step is to nominate"
+    _FRESH_STARTS = re.compile(
+        r'^(show|create|activate|close|release|cancel|nominate|approve|reject|'
+        r'retract|finalize|list|get|fetch|give|display|tell|explain|what is a|'
+        r'how does|the first step|step one|to start)\b',
+        re.IGNORECASE,
+    )
+    if _FRESH_STARTS.match(message.strip()):
+        return False
+
     return bool(_FOLLOWUP_PATTERN.search(message))

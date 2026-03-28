@@ -9,7 +9,7 @@ RATE_TTL_MIN  = 60     # 1 minute window
 RATE_TTL_HOUR = 3600   # 1 hour window
 MAX_PER_MIN   = 20   # raised from 10 — multi-step flows (approve/reject) need ~7 messages
 MAX_PER_HOUR  = 200  # raised proportionally
-HISTORY_TTL   = 3600   # 1 hour — conversation memory persists longer than slot-fill session
+HISTORY_TTL   = 86400  # 24 hours — covers full work day; old sessions restored from DB anyway
 MAX_HISTORY   = 10     # 5 exchanges (user + assistant pairs)
 
 
