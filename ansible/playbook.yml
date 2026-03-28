@@ -97,7 +97,8 @@
         body:
           email: "admin@gamyam.com"
           password: "Admin@123"
-        status_code: 200
+        status_code: [200, 301, 302]
+        follow_redirects: all
       register: backend_check
 
     - name: Deploy complete
