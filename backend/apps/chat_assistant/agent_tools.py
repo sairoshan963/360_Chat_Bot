@@ -989,7 +989,12 @@ def _get_calibration_flags(cycle_id: str, threshold: float = 0.8, manager_id=Non
     with connection.cursor() as cur:
         cur.execute(sql, params)
         cols = ['employee', 'department', 'manager_score', 'peer_score', 'gap', 'direction']
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            for k in ('manager_score', 'peer_score', 'gap'):
+                d[k] = float(d[k]) if d[k] is not None else None
+            rows.append(d)
     return json.dumps({
         "calibration_flags": rows,
         "total_flagged": len(rows),
@@ -1058,7 +1063,12 @@ def _get_attrition_risk(min_decline: float = 0.3, lookback_cycles: int = 3, mana
     with connection.cursor() as cur:
         cur.execute(sql, params)
         cols = ['employee', 'department', 'latest_score', 'prev_score', 'oldest_score', 'decline', 'cycle_count']
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            for k in ('latest_score', 'prev_score', 'oldest_score', 'decline'):
+                d[k] = float(d[k]) if d[k] is not None else None
+            rows.append(d)
     return json.dumps({
         "attrition_risk": rows,
         "total_at_risk": len(rows),
@@ -1111,6 +1121,8 @@ def _get_team_coaching_data(manager_id=None, cycle_id=None):
         for r in cur.fetchall():
             d = dict(zip(cols, r))
             d['computed_at'] = str(d['computed_at'])
+            for k in ('overall', 'peer', 'manager', 'self_assessed'):
+                d[k] = float(d[k]) if d[k] is not None else None
             rows.append(d)
 
     # Group by employee for easier LLM synthesis
@@ -1205,7 +1217,12 @@ def _get_promotion_readiness(min_cycles: int = 2, min_avg_score: float = 3.5, ma
             'employee', 'department', 'cycle_count', 'avg_overall', 'avg_peer',
             'avg_manager', 'score_stddev', 'latest_score', 'improvement',
         ]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            for k in ('avg_overall', 'avg_peer', 'avg_manager', 'score_stddev', 'latest_score', 'improvement'):
+                d[k] = float(d[k]) if d[k] is not None else None
+            rows.append(d)
 
     # Assign a readiness tier
     for r in rows:
@@ -1254,6 +1271,8 @@ def _get_my_full_results(user_id: str):
         for r in cur.fetchall():
             d = dict(zip(score_cols, r))
             d['computed_at'] = str(d['computed_at'])
+            for k in ('overall', 'peer', 'manager', 'self_assessed'):
+                d[k] = float(d[k]) if d[k] is not None else None
             scores.append(d)
 
         # Anonymised feedback text (no reviewer names, no task IDs)
