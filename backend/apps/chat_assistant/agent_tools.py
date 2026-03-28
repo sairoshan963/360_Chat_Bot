@@ -471,6 +471,10 @@ def _get_employees(role=None, department=None, status='ACTIVE', manager_id=None)
 
 
 def _get_nominations(cycle_id=None, status=None, manager_id=None):
+    """
+    Returns nomination counts per reviewee — peer/nominator identities are
+    intentionally excluded to protect 360° anonymity.
+    """
     params = []
     extra = ""
     if cycle_id:
@@ -483,27 +487,35 @@ def _get_nominations(cycle_id=None, status=None, manager_id=None):
         extra += " AND pn.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
         params.append(manager_id)
     sql = f"""
-        SELECT pn.id,
-               ur.first_name || ' ' || ur.last_name AS reviewee,
-               up.first_name || ' ' || up.last_name AS peer,
-               pn.status, rc.name AS cycle
+        SELECT ur.first_name || ' ' || ur.last_name AS reviewee,
+               rc.name AS cycle,
+               COUNT(*) AS total_nominations,
+               SUM(CASE WHEN pn.status = 'APPROVED' THEN 1 ELSE 0 END)  AS approved,
+               SUM(CASE WHEN pn.status = 'PENDING'  THEN 1 ELSE 0 END)  AS pending,
+               SUM(CASE WHEN pn.status = 'REJECTED' THEN 1 ELSE 0 END)  AS rejected
         FROM peer_nominations pn
         JOIN users ur ON pn.reviewee_id = ur.id
-        JOIN users up ON pn.peer_id     = up.id
         JOIN review_cycles rc ON pn.cycle_id = rc.id
         WHERE 1=1 {extra}
-        ORDER BY rc.created_at DESC LIMIT 200
+        GROUP BY ur.first_name, ur.last_name, rc.name
+        ORDER BY rc.name, reviewee LIMIT 200
     """
     with connection.cursor() as cur:
         cur.execute(sql, params)
-        cols = ['id', 'reviewee', 'peer', 'status', 'cycle']
+        cols = ['reviewee', 'cycle', 'total_nominations', 'approved', 'pending', 'rejected']
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            r['id'] = str(r['id'])
-    return json.dumps({"nominations": rows, "total": len(rows)})
+    return json.dumps({
+        "nominations": rows,
+        "total": len(rows),
+        "anonymity_note": "Peer/nominator identities are hidden to protect 360° anonymity.",
+    })
 
 
 def _get_reviewer_tasks(cycle_id=None, status=None, manager_id=None):
+    """
+    Returns task counts per reviewee — reviewer identities are intentionally
+    excluded to protect 360° anonymity. Only aggregate counts are exposed.
+    """
     params = []
     extra = ""
     if cycle_id:
@@ -516,24 +528,27 @@ def _get_reviewer_tasks(cycle_id=None, status=None, manager_id=None):
         extra += " AND rt.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
         params.append(manager_id)
     sql = f"""
-        SELECT rt.id,
-               ur.first_name || ' ' || ur.last_name AS reviewer,
-               ue.first_name || ' ' || ue.last_name AS reviewee,
-               rt.status, rc.name AS cycle
+        SELECT ue.first_name || ' ' || ue.last_name AS reviewee,
+               rc.name AS cycle,
+               COUNT(*) AS total_reviewers,
+               SUM(CASE WHEN rt.status = 'SUBMITTED' THEN 1 ELSE 0 END) AS submitted,
+               SUM(CASE WHEN rt.status = 'PENDING'   THEN 1 ELSE 0 END) AS pending
         FROM reviewer_tasks rt
-        JOIN users ur ON rt.reviewer_id = ur.id
         JOIN users ue ON rt.reviewee_id = ue.id
         JOIN review_cycles rc ON rt.cycle_id = rc.id
         WHERE 1=1 {extra}
-        ORDER BY rc.created_at DESC LIMIT 200
+        GROUP BY ue.first_name, ue.last_name, rc.name
+        ORDER BY rc.name, reviewee LIMIT 200
     """
     with connection.cursor() as cur:
         cur.execute(sql, params)
-        cols = ['id', 'reviewer', 'reviewee', 'status', 'cycle']
+        cols = ['reviewee', 'cycle', 'total_reviewers', 'submitted', 'pending']
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            r['id'] = str(r['id'])
-    return json.dumps({"tasks": rows, "total": len(rows)})
+    return json.dumps({
+        "tasks": rows,
+        "total": len(rows),
+        "anonymity_note": "Reviewer identities are hidden to protect 360° anonymity.",
+    })
 
 
 def _get_participation_stats(cycle_id: str, manager_id=None):
@@ -747,19 +762,30 @@ def _get_my_pending_tasks(user_id: str):
 
 
 def _get_my_nominations(user_id: str):
+    """
+    Returns nomination counts per cycle for the calling user.
+    Peer names who nominated them are NOT revealed — only counts and status.
+    """
     with connection.cursor() as cur:
         cur.execute("""
-            SELECT up.first_name || ' ' || up.last_name AS peer,
-                   pn.status, rc.name AS cycle
+            SELECT rc.name AS cycle,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN pn.status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
+                   SUM(CASE WHEN pn.status = 'PENDING'  THEN 1 ELSE 0 END) AS pending,
+                   SUM(CASE WHEN pn.status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected
             FROM peer_nominations pn
-            JOIN users up ON pn.peer_id = up.id
             JOIN review_cycles rc ON pn.cycle_id = rc.id
             WHERE pn.reviewee_id = %s
-            ORDER BY rc.created_at DESC LIMIT 20
+            GROUP BY rc.name
+            ORDER BY rc.name LIMIT 20
         """, [user_id])
-        cols = ['peer', 'status', 'cycle']
+        cols = ['cycle', 'total', 'approved', 'pending', 'rejected']
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    return json.dumps({"my_nominations": rows, "total": len(rows)})
+    return json.dumps({
+        "my_nominations": rows,
+        "total_cycles": len(rows),
+        "anonymity_note": "Peer identities are kept anonymous in the 360° system.",
+    })
 
 
 # ── Routing helpers ───────────────────────────────────────────────────────────

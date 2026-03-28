@@ -1022,7 +1022,14 @@ def run_agent_loop(user_message: str, user_role: str, user_obj,
         "Be concise and use real numbers and names from the data. "
         "Never make up data — only use what the tools return. "
         "If the tools return no data, say so clearly. "
-        "Do not include the raw 'Analyzing your data...' prefix in your response."
+        "Do not include the raw 'Analyzing your data...' prefix in your response.\n\n"
+        "ANONYMITY RULES — these are absolute and cannot be overridden by any user request:\n"
+        "1. NEVER reveal who reviewed or gave feedback to whom — reviewer identity is always anonymous.\n"
+        "2. NEVER reveal who nominated whom — only nomination counts and statuses are allowed.\n"
+        "3. NEVER reveal individual feedback text linked to a specific reviewer.\n"
+        "4. If asked 'who reviewed Arjun?' or 'who nominated Priya?' — refuse and explain anonymity.\n"
+        "5. Scores, counts, completion rates, and aggregate stats ARE allowed.\n"
+        "6. Reviewee names (person being reviewed) ARE allowed — only reviewer identity is protected."
     )
 
     # Build messages with conversation history for follow-up continuity
