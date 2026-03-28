@@ -1794,21 +1794,42 @@ class ChatSessionView(APIView):
 
 class ChatHistoryView(APIView):
     """
-    GET /api/v1/chat/history/              — flat log of last 50 messages (widget load)
-    GET /api/v1/chat/history/?session_id=X — all messages for a specific session
+    GET    /api/v1/chat/history/              — flat log of last 50 messages (widget load)
+    GET    /api/v1/chat/history/?session_id=X — all messages for a specific session.
+                                                Also repopulates Redis from DB so follow-up
+                                                questions work correctly on old sessions.
+    DELETE /api/v1/chat/history/              — clears Redis memory only (New Chat).
+                                                Does NOT delete DB logs or sidebar sessions.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         session_id = request.query_params.get('session_id')
         if session_id:
-            logs = ChatLog.objects.filter(
-                user=request.user, session_id=session_id
-            ).order_by('created_at')
+            logs = list(
+                ChatLog.objects.filter(
+                    user=request.user, session_id=session_id
+                ).order_by('created_at')
+            )
+            # Fix 2: repopulate Redis with last 10 messages from this session
+            # so the LLM has memory and follow-up questions work on old sessions.
+            session_manager.clear_chat_history(str(request.user.id))
+            for log in logs[-10:]:
+                if log.message:
+                    session_manager.append_chat_history(str(request.user.id), 'user', log.message)
+                if log.response_message:
+                    session_manager.append_chat_history(str(request.user.id), 'assistant', log.response_message)
         else:
             logs = ChatLog.objects.filter(user=request.user).order_by('-created_at')[:50]
         serializer = ChatLogSerializer(logs, many=True)
         return Response({"history": serializer.data})
+
+    def delete(self, request):
+        """Fix 1: clear Redis memory when user clicks New Chat.
+        DB logs and sidebar sessions are untouched."""
+        session_manager.clear_chat_history(str(request.user.id))
+        session_manager.clear_session(str(request.user.id))
+        return Response({"cleared": True})
 
 
 class ChatSessionsView(APIView):

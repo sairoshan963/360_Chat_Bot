@@ -9,7 +9,7 @@ import {
   PlusOutlined, DeleteOutlined, EditOutlined, PushpinOutlined,
   ShrinkOutlined, PaperClipOutlined,
 } from '@ant-design/icons';
-import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, discardSession, deleteSession, deleteAllSessions, renameSession, uploadChatFile } from '../../api/chat';
+import { sendMessage, sendMessageStream, confirmAction, getChatHistory, getChatSessions, discardSession, deleteSession, deleteAllSessions, renameSession, uploadChatFile, clearChatMemory } from '../../api/chat';
 import useAuthStore from '../../store/authStore';
 import { useSpeechToText } from '../../hooks/useSpeechToText';
 
@@ -1537,6 +1537,7 @@ export default function ChatPage() {
     setActiveTitle('');
     setShowInfo(false);
     try { await discardSession(); } catch { /* silent */ }
+    try { await clearChatMemory(); } catch { /* silent */ }
     inputRef.current?.focus();
   };
 

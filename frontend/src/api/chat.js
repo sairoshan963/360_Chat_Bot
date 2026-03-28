@@ -63,6 +63,9 @@ export const confirmAction = (sessionId, confirmed) =>
 export const getChatHistory = (sessionId = null) =>
   api.get('/chat/history/', sessionId ? { params: { session_id: sessionId } } : {});
 
+export const clearChatMemory = () =>
+  api.delete('/chat/history/');
+
 export const getChatSessions = () =>
   api.get('/chat/sessions/');
 
