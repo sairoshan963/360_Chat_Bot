@@ -790,3 +790,47 @@ def is_agent_question(message: str) -> bool:
 def is_employee_self_query(message: str) -> bool:
     """Return True if an EMPLOYEE is asking about their own data in natural language."""
     return bool(_EMPLOYEE_SELF_PATTERN.search(message))
+
+
+# ── Follow-up question detection ──────────────────────────────────────────────
+
+_FOLLOWUP_PATTERN = re.compile(
+    # Ordinal/positional references: "the first one", "task 2", "the second task"
+    r'\b(the )?(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)\b'
+    r'|\btask\s?[0-9]\b'
+    r'|\bnumber\s?[0-9]\b'
+    r'|\bitem\s?[0-9]\b'
+    # Pronoun references to previous answer
+    r'|\b(that|this|it|those|them|these)\s+(one|task|cycle|nomination|deadline|review|person|employee|result)\b'
+    r'|\b(that|this|those|them)\s+(above|one|result|item)\b'
+    # "above", "below", "mentioned" references
+    r'|\b(above|below|mentioned|listed|shown|previous)\b'
+    # Follow-up question starters
+    r'|\band (what|when|who|how|why|which|where)\b'
+    r'|\bwhat (about|is the deadline for|is the due date|is their score)\b'
+    r'|\bhow (urgent|important|many days|much time) (is|are|left|remaining|do i)\b'
+    # "tell me more", "more details", "explain"
+    r'|\b(tell me more|more details|more about|elaborate|explain (that|this|it|more))\b'
+    # "which one should I", "can I submit it"
+    r'|\bwhich (one|task|should|is)\b'
+    r'|\b(can|should|do) i (do|submit|complete|finish|start) (it|that|this|the|one)\b',
+    re.IGNORECASE,
+)
+
+
+def is_followup_question(message: str, chat_history: list) -> bool:
+    """
+    Return True if:
+    1. The message contains reference words pointing to a previous response
+    2. There is actual chat history to reference
+
+    Used to route follow-up questions to the agent so it can use
+    conversation history to answer contextually.
+    """
+    if not chat_history:
+        return False
+    # Only trigger if there's at least one assistant response in history
+    has_prev_response = any(e.get("role") == "assistant" for e in chat_history)
+    if not has_prev_response:
+        return False
+    return bool(_FOLLOWUP_PATTERN.search(message))

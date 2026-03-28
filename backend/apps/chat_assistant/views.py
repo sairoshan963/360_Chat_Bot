@@ -448,10 +448,33 @@ def _run_pipeline(user, message, display_message, session_id):
                     "data": _result.get('data', {}), "needs_input": False,
                 }
 
+    # ── Follow-up detection: route to agent when user references previous response ─
+    # Must run BEFORE intent detection so "deadline for task 2" isn't misclassified
+    # as show_cycle_deadlines when the user actually meant a specific task from history.
+    _user_role = getattr(user, 'role', '')
+    if not session.get('intent') and not session.get('awaiting_confirm'):
+        from .agent_tools import is_followup_question
+        _followup_history = session_manager.get_chat_history(str(user.id))
+        if is_followup_question(message, _followup_history):
+            logger.debug("  FOLLOWUP  : detected reference to previous response → agent")
+            _employee_followup = (_user_role == 'EMPLOYEE')
+            return {
+                "_agent_needed":        True,
+                "_agent_message":       message,
+                "_agent_employee_mode": _employee_followup,
+                "_log_user":            user,
+                "_log_session":         session_id,
+                "_log_display":         display_message,
+                "session_id":           session_id,
+                "intent":               "followup_query",
+                "status":               "clarify",
+                "data":                 {},
+                "needs_input":          False,
+            }
+
     # ── Phase 4: Early data-analysis bypass (SUPER_ADMIN / HR_ADMIN only) ───
     # Must happen BEFORE intent detection so the intent parser cannot intercept
     # data analysis questions and misclassify them as known commands.
-    _user_role = getattr(user, 'role', '')
     if (not session.get('intent') and not session.get('awaiting_confirm') and
             _user_role in ('SUPER_ADMIN', 'HR_ADMIN') and
             data_context_fetcher.is_strong_data_analysis_question(message)):
