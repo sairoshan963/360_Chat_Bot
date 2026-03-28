@@ -245,6 +245,120 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+
+    # ── Phase 5 Tier 1: Calibration Assistant ────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_calibration_flags",
+            "description": (
+                "Flag employees where manager score and peer score differ significantly "
+                "(gap > threshold). Used to identify calibration issues or bias in ratings. "
+                "Use when asked: 'calibration issues', 'score discrepancy', 'manager vs peer gap', "
+                "'who has inconsistent ratings', 'score mismatch', 'who needs calibration review', "
+                "'rating gaps', 'manager bias'. "
+                "Always call get_default_cycle first if no cycle ID is known. "
+                "For MANAGER role, scoped to direct reports only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cycle_id": {"type": "string", "description": "Required. The cycle ID."},
+                    "threshold": {
+                        "type": "number",
+                        "description": "Optional. Minimum score gap to flag. Default 0.8.",
+                    },
+                },
+                "required": ["cycle_id"],
+            },
+        },
+    },
+
+    # ── Phase 5 Tier 1: Attrition Risk ───────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_attrition_risk",
+            "description": (
+                "Identify employees showing a declining score trend across multiple cycles — "
+                "a signal of disengagement or flight risk. "
+                "Use when asked: 'attrition risk', 'flight risk', 'who is declining', "
+                "'score drop', 'declining performers', 'at risk employees', "
+                "'who might leave', 'disengaged employees', 'score trend down'. "
+                "For MANAGER role, scoped to direct reports only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_decline": {
+                        "type": "number",
+                        "description": "Optional. Minimum score drop to flag. Default 0.3.",
+                    },
+                    "lookback_cycles": {
+                        "type": "integer",
+                        "description": "Optional. Number of recent cycles to analyse. Default 3.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── Phase 5 Tier 2: Manager Coaching Digest ───────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_team_coaching_data",
+            "description": (
+                "Fetch team members' multi-cycle score data to support coaching recommendations. "
+                "Returns scores, trends, and feedback summary per team member. "
+                "Use when asked: 'coaching recommendations', 'coaching digest', 'who needs coaching', "
+                "'team development', 'who should I focus on', 'development areas', "
+                "'who needs support', 'my team coaching', 'help my team improve'. "
+                "For MANAGER role, automatically scoped to direct reports."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cycle_id": {
+                        "type": "string",
+                        "description": "Optional. Focus on a specific cycle. If omitted, uses recent cycles.",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+
+    # ── Phase 5 Tier 2: Promotion Readiness ───────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_promotion_readiness",
+            "description": (
+                "Rank employees by promotion readiness based on multi-cycle performance: "
+                "average score, improvement trend, consistency, peer and manager alignment. "
+                "Use when asked: 'promotion readiness', 'who is ready for promotion', "
+                "'top candidates for promotion', 'who deserves a raise', 'high performers', "
+                "'promotion list', 'succession planning', 'who is ready to level up'. "
+                "For MANAGER role, scoped to direct reports only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_cycles": {
+                        "type": "integer",
+                        "description": "Optional. Minimum number of cycles an employee must have. Default 2.",
+                    },
+                    "min_avg_score": {
+                        "type": "number",
+                        "description": "Optional. Minimum average score threshold. Default 3.5.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -285,6 +399,23 @@ EMPLOYEE_TOOL_DEFINITIONS = [
                 "Get the current user's peer nominations: who nominated them and status. "
                 "Use when asked: 'who nominated me', 'my nomination status', "
                 "'are my nominations approved', 'which peers are reviewing me'."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    # ── Phase 5 Tier 1: Personal Results Narrative ───────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_full_results",
+            "description": (
+                "Get the current user's complete performance data: scores across all cycles "
+                "plus anonymised feedback text they received. Used to generate a personal "
+                "performance narrative or detailed summary. "
+                "Use when asked: 'explain my results', 'write my performance summary', "
+                "'my performance narrative', 'analyse my feedback', 'what do my results mean', "
+                "'summarize my performance', 'give me a detailed review of my results', "
+                "'what areas should I improve', 'my strengths and weaknesses'."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -352,6 +483,39 @@ def execute_tool(name: str, arguments: dict, user) -> str:
             return _get_my_pending_tasks(user_id)
         if name == 'get_my_nominations':
             return _get_my_nominations(user_id)
+        if name == 'get_my_full_results':
+            return _get_my_full_results(user_id)
+
+        # Phase 5 Tier 1 tools
+        if name == 'get_calibration_flags':
+            if not (is_super or user_role in ('MANAGER',)):
+                return json.dumps({"error": "Calibration data requires Manager, HR_ADMIN, or SUPER_ADMIN role."})
+            return _get_calibration_flags(
+                arguments.get('cycle_id', ''),
+                arguments.get('threshold', 0.8),
+                manager_id,
+            )
+        if name == 'get_attrition_risk':
+            if not (is_super or user_role in ('MANAGER',)):
+                return json.dumps({"error": "Attrition risk data requires Manager, HR_ADMIN, or SUPER_ADMIN role."})
+            return _get_attrition_risk(
+                arguments.get('min_decline', 0.3),
+                arguments.get('lookback_cycles', 3),
+                manager_id,
+            )
+
+        # Phase 5 Tier 2 tools
+        if name == 'get_team_coaching_data':
+            if not (is_super or user_role in ('MANAGER',)):
+                return json.dumps({"error": "Coaching data requires Manager, HR_ADMIN, or SUPER_ADMIN role."})
+            return _get_team_coaching_data(manager_id, arguments.get('cycle_id'))
+        if name == 'get_promotion_readiness':
+            if not is_super:
+                return json.dumps({"error": "Promotion readiness is only available to HR_ADMIN and SUPER_ADMIN."})
+            return _get_promotion_readiness(
+                arguments.get('min_cycles', 2),
+                arguments.get('min_avg_score', 3.5),
+            )
 
         return json.dumps({"error": f"Unknown tool: {name}"})
     except Exception as exc:
@@ -788,6 +952,346 @@ def _get_my_nominations(user_id: str):
     })
 
 
+# ── Phase 5 Tier 1: Calibration Assistant ────────────────────────────────────
+
+def _get_calibration_flags(cycle_id: str, threshold: float = 0.8, manager_id=None):
+    """
+    Flag employees where |manager_score - peer_score| > threshold.
+    Returns flagged employees with gap size and both scores.
+    Reviewer identity is not exposed — only aggregate role scores (manager vs peer average).
+    """
+    params = [cycle_id, float(threshold)]
+    team_filter = ""
+    if manager_id:
+        team_filter = " AND ar.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
+        params.append(manager_id)
+    sql = f"""
+        SELECT u.first_name || ' ' || u.last_name AS employee,
+               d.name AS department,
+               ROUND(ar.manager_score::numeric, 2) AS manager_score,
+               ROUND(ar.peer_score::numeric, 2)    AS peer_score,
+               ROUND(ABS(ar.manager_score - ar.peer_score)::numeric, 2) AS gap,
+               CASE
+                   WHEN ar.manager_score > ar.peer_score THEN 'Manager rated higher than peers'
+                   ELSE 'Peers rated higher than manager'
+               END AS direction
+        FROM aggregated_results ar
+        JOIN users u ON ar.reviewee_id = u.id
+        LEFT JOIN departments d ON u.department_id = d.id
+        WHERE ar.cycle_id = %s
+          AND ar.manager_score IS NOT NULL
+          AND ar.peer_score IS NOT NULL
+          AND ABS(ar.manager_score - ar.peer_score) > %s
+          {team_filter}
+        ORDER BY ABS(ar.manager_score - ar.peer_score) DESC
+        LIMIT 50
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = ['employee', 'department', 'manager_score', 'peer_score', 'gap', 'direction']
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return json.dumps({
+        "calibration_flags": rows,
+        "total_flagged": len(rows),
+        "threshold": threshold,
+        "note": (
+            "Gap = |manager_score - peer_score|. Reviewer identities are not shown — "
+            "only aggregate manager vs peer averages are used."
+        ),
+    })
+
+
+# ── Phase 5 Tier 1: Attrition Risk ───────────────────────────────────────────
+
+def _get_attrition_risk(min_decline: float = 0.3, lookback_cycles: int = 3, manager_id=None):
+    """
+    Identify employees with declining overall_score across recent cycles.
+    Uses the last N cycles and flags those whose latest score dropped by min_decline or more.
+    """
+    team_filter = ""
+    params: list = []
+    if manager_id:
+        team_filter = " AND ar.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
+        params.append(manager_id)
+
+    sql = f"""
+        WITH ranked AS (
+            SELECT ar.reviewee_id,
+                   u.first_name || ' ' || u.last_name AS employee,
+                   d.name AS department,
+                   ar.overall_score,
+                   ar.computed_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ar.reviewee_id
+                       ORDER BY ar.computed_at DESC
+                   ) AS rn
+            FROM aggregated_results ar
+            JOIN users u ON ar.reviewee_id = u.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE ar.overall_score IS NOT NULL {team_filter}
+        ),
+        windowed AS (
+            SELECT reviewee_id, employee, department,
+                   MAX(CASE WHEN rn = 1 THEN overall_score END) AS latest,
+                   MAX(CASE WHEN rn = 2 THEN overall_score END) AS prev,
+                   MAX(CASE WHEN rn = 3 THEN overall_score END) AS oldest,
+                   COUNT(*) AS cycle_count
+            FROM ranked
+            WHERE rn <= %s
+            GROUP BY reviewee_id, employee, department
+            HAVING COUNT(*) >= 2
+               AND MAX(CASE WHEN rn = 1 THEN overall_score END) IS NOT NULL
+               AND MAX(CASE WHEN rn = 2 THEN overall_score END) IS NOT NULL
+        )
+        SELECT employee, department,
+               ROUND(latest::numeric, 2)   AS latest_score,
+               ROUND(prev::numeric, 2)     AS prev_score,
+               ROUND(oldest::numeric, 2)   AS oldest_score,
+               ROUND((prev - latest)::numeric, 2) AS decline,
+               cycle_count
+        FROM windowed
+        WHERE (prev - latest) >= %s
+        ORDER BY (prev - latest) DESC
+        LIMIT 30
+    """
+    params.extend([lookback_cycles, float(min_decline)])
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = ['employee', 'department', 'latest_score', 'prev_score', 'oldest_score', 'decline', 'cycle_count']
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return json.dumps({
+        "attrition_risk": rows,
+        "total_at_risk": len(rows),
+        "min_decline_threshold": min_decline,
+        "lookback_cycles": lookback_cycles,
+        "note": "Decline = previous score minus latest score. Higher decline = higher risk.",
+    })
+
+
+# ── Phase 5 Tier 2: Manager Coaching Digest ──────────────────────────────────
+
+def _get_team_coaching_data(manager_id=None, cycle_id=None):
+    """
+    Fetch team members' scores across recent cycles for coaching analysis.
+    Returns per-member scores, trend, and text feedback count.
+    No reviewer identities — only aggregate scores.
+    """
+    params: list = []
+    cycle_filter = ""
+    team_filter  = ""
+
+    if manager_id:
+        team_filter = " AND ar.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
+        params.append(manager_id)
+    if cycle_id:
+        cycle_filter = " AND ar.cycle_id = %s"
+        params.append(cycle_id)
+
+    sql = f"""
+        SELECT u.first_name || ' ' || u.last_name AS employee,
+               d.name AS department,
+               rc.name AS cycle,
+               ROUND(ar.overall_score::numeric, 2)  AS overall,
+               ROUND(ar.peer_score::numeric, 2)     AS peer,
+               ROUND(ar.manager_score::numeric, 2)  AS manager,
+               ROUND(ar.self_score::numeric, 2)     AS self_assessed,
+               ar.computed_at
+        FROM aggregated_results ar
+        JOIN users u ON ar.reviewee_id = u.id
+        LEFT JOIN departments d ON u.department_id = d.id
+        JOIN review_cycles rc ON ar.cycle_id = rc.id
+        WHERE ar.overall_score IS NOT NULL {team_filter} {cycle_filter}
+        ORDER BY u.first_name, ar.computed_at DESC
+        LIMIT 100
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = ['employee', 'department', 'cycle', 'overall', 'peer', 'manager', 'self_assessed', 'computed_at']
+        rows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            d['computed_at'] = str(d['computed_at'])
+            rows.append(d)
+
+    # Group by employee for easier LLM synthesis
+    from collections import defaultdict
+    grouped: dict = defaultdict(list)
+    for r in rows:
+        grouped[r['employee']].append({
+            'cycle':         r['cycle'],
+            'overall':       r['overall'],
+            'peer':          r['peer'],
+            'manager':       r['manager'],
+            'self_assessed': r['self_assessed'],
+        })
+
+    team_summary = []
+    for emp, cycles in grouped.items():
+        scores = [c['overall'] for c in cycles if c['overall'] is not None]
+        trend  = round(float(scores[0]) - float(scores[-1]), 2) if len(scores) >= 2 else 0.0
+        team_summary.append({
+            'employee':        emp,
+            'cycles_reviewed': len(cycles),
+            'latest_overall':  float(scores[0]) if scores else None,
+            'avg_overall':     round(sum(float(s) for s in scores) / len(scores), 2) if scores else None,
+            'trend':           trend,  # positive = improving, negative = declining
+            'history':         cycles,
+        })
+
+    team_summary.sort(key=lambda x: (x['latest_overall'] or 0))
+
+    return json.dumps({
+        "team_coaching_data": team_summary,
+        "total_members": len(team_summary),
+        "note": "trend = latest_overall - oldest_overall (positive = improving). Use this to prioritise coaching focus areas.",
+    })
+
+
+# ── Phase 5 Tier 2: Promotion Readiness ──────────────────────────────────────
+
+def _get_promotion_readiness(min_cycles: int = 2, min_avg_score: float = 3.5, manager_id=None):
+    """
+    Rank employees by promotion readiness using multi-cycle score analysis.
+    Criteria: avg overall score, improvement trend, manager-peer alignment, consistency.
+    """
+    team_filter = ""
+    params: list = []
+    if manager_id:
+        team_filter = " AND ar.reviewee_id IN (SELECT employee_id FROM org_hierarchy WHERE manager_id = %s)"
+        params.append(manager_id)
+    params.extend([min_cycles, float(min_avg_score)])
+
+    sql = f"""
+        WITH history AS (
+            SELECT ar.reviewee_id,
+                   u.first_name || ' ' || u.last_name AS employee,
+                   d.name AS department,
+                   ar.overall_score,
+                   ar.peer_score,
+                   ar.manager_score,
+                   ar.computed_at,
+                   ROW_NUMBER() OVER (PARTITION BY ar.reviewee_id ORDER BY ar.computed_at DESC) AS rn_desc,
+                   ROW_NUMBER() OVER (PARTITION BY ar.reviewee_id ORDER BY ar.computed_at ASC)  AS rn_asc
+            FROM aggregated_results ar
+            JOIN users u ON ar.reviewee_id = u.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE ar.overall_score IS NOT NULL {team_filter}
+        ),
+        agg AS (
+            SELECT reviewee_id, employee, department,
+                   COUNT(*)                                AS cycle_count,
+                   ROUND(AVG(overall_score)::numeric, 2)  AS avg_overall,
+                   ROUND(AVG(peer_score)::numeric, 2)     AS avg_peer,
+                   ROUND(AVG(manager_score)::numeric, 2)  AS avg_manager,
+                   ROUND(STDDEV(overall_score)::numeric, 2) AS score_stddev,
+                   MAX(CASE WHEN rn_desc = 1 THEN overall_score END) AS latest_score,
+                   MAX(CASE WHEN rn_asc  = 1 THEN overall_score END) AS earliest_score
+            FROM history
+            GROUP BY reviewee_id, employee, department
+            HAVING COUNT(*) >= %s
+               AND AVG(overall_score) >= %s
+        )
+        SELECT employee, department, cycle_count,
+               avg_overall, avg_peer, avg_manager, score_stddev,
+               ROUND(latest_score::numeric, 2) AS latest_score,
+               ROUND((latest_score - earliest_score)::numeric, 2) AS improvement
+        FROM agg
+        ORDER BY avg_overall DESC, improvement DESC
+        LIMIT 20
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [
+            'employee', 'department', 'cycle_count', 'avg_overall', 'avg_peer',
+            'avg_manager', 'score_stddev', 'latest_score', 'improvement',
+        ]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    # Assign a readiness tier
+    for r in rows:
+        avg = float(r['avg_overall'] or 0)
+        imp = float(r['improvement'] or 0)
+        if avg >= 4.2 and imp >= 0:
+            r['readiness'] = 'High — strong candidate'
+        elif avg >= 3.8:
+            r['readiness'] = 'Medium — developing well'
+        else:
+            r['readiness'] = 'Emerging — monitor progress'
+
+    return json.dumps({
+        "promotion_readiness": rows,
+        "total_candidates": len(rows),
+        "criteria": f"Min {min_cycles} cycles, avg score ≥ {min_avg_score}",
+        "note": "improvement = latest score minus earliest score. score_stddev measures consistency (lower = more consistent).",
+    })
+
+
+# ── Phase 5 Tier 1: Personal Results Narrative ───────────────────────────────
+
+def _get_my_full_results(user_id: str):
+    """
+    Fetch the employee's own scores across all cycles plus anonymised feedback text.
+    No reviewer identity is included — only the feedback text content.
+    Used to generate a personal performance narrative.
+    """
+    with connection.cursor() as cur:
+        # Scores across cycles
+        cur.execute("""
+            SELECT rc.name AS cycle,
+                   ROUND(ar.overall_score::numeric, 2) AS overall,
+                   ROUND(ar.peer_score::numeric, 2)    AS peer,
+                   ROUND(ar.manager_score::numeric, 2) AS manager,
+                   ROUND(ar.self_score::numeric, 2)    AS self_assessed,
+                   ar.computed_at
+            FROM aggregated_results ar
+            JOIN review_cycles rc ON ar.cycle_id = rc.id
+            WHERE ar.reviewee_id = %s
+            ORDER BY ar.computed_at DESC
+            LIMIT 6
+        """, [user_id])
+        score_cols = ['cycle', 'overall', 'peer', 'manager', 'self_assessed', 'computed_at']
+        scores = []
+        for r in cur.fetchall():
+            d = dict(zip(score_cols, r))
+            d['computed_at'] = str(d['computed_at'])
+            scores.append(d)
+
+        # Anonymised feedback text (no reviewer names, no task IDs)
+        cur.execute("""
+            SELECT tq.question_text,
+                   fa.text_value,
+                   fa.rating_value,
+                   rc.name AS cycle
+            FROM feedback_answers fa
+            JOIN feedback_responses fr ON fa.response_id = fr.id
+            JOIN reviewer_tasks rt ON fr.task_id = rt.id
+            JOIN template_questions tq ON fa.question_id = tq.id
+            JOIN review_cycles rc ON rt.cycle_id = rc.id
+            WHERE rt.reviewee_id = %s
+              AND rt.status = 'SUBMITTED'
+              AND (fa.text_value IS NOT NULL AND fa.text_value <> '')
+            ORDER BY fr.submitted_at DESC
+            LIMIT 40
+        """, [user_id])
+        fb_cols = ['question', 'text', 'rating', 'cycle']
+        feedback = []
+        for r in cur.fetchall():
+            d = dict(zip(fb_cols, r))
+            d['rating'] = float(d['rating']) if d['rating'] else None
+            feedback.append(d)
+
+    return json.dumps({
+        "my_scores":   scores,
+        "my_feedback": feedback,
+        "anonymity_note": "Feedback text is shown without reviewer attribution to preserve anonymity.",
+        "narrative_hint": (
+            "Use the scores and feedback text above to write a comprehensive, constructive, "
+            "first-person performance narrative for this employee. Highlight strengths, "
+            "areas for improvement, and score trends across cycles."
+        ),
+    })
+
+
 # ── Routing helpers ───────────────────────────────────────────────────────────
 
 _AGENT_PATTERN = re.compile(
@@ -796,14 +1300,28 @@ _AGENT_PATTERN = re.compile(
     r'breakdown|versus|vs\.?|differ|rank|top \d|bottom \d|percent|'
     r'rate|haven.t|not submitted|still pending|lagging|behind|'
     r'department|employees? in|cycles? with|never participated|'
-    r'announcements?|templates?|audit|activity|recent actions?)\b',
+    r'announcements?|templates?|audit|activity|recent actions?|'
+    # Phase 5: Calibration, Attrition, Coaching, Promotion
+    r'calibration|score gap|score discrepancy|rating gap|manager bias|'
+    r'attrition|flight risk|declining|score drop|at.risk|disengage|'
+    r'coaching|coaching digest|who needs (support|coaching|help)|'
+    r'development area|team development|'
+    r'promotion|readiness|succession|level up|ready (for|to)|'
+    r'who (should|deserve|is ready))\b',
     re.IGNORECASE,
 )
 
 _EMPLOYEE_SELF_PATTERN = re.compile(
-    r'\b(my score|my performance|my result|how am i|how did i|'
+    r'\b(my scores?|my performance|my results?|how am i|how did i|'
     r'my feedback|my rating|my pending|what do i still|'
-    r'who nominated me|my nomination|am i doing|my progress)\b',
+    r'who nominated me|my nomination|am i doing|my progress|'
+    # Phase 5: Personal narrative triggers
+    r'explain my (results?|feedback|performance)|'
+    r'my performance (summary|narrative|report|analysis)|'
+    r'(summarize|analyse|analyze) my (feedback|performance|results?)|'
+    r'my (strengths?|weaknesses?|areas?)|'
+    r'what (should i improve|am i good at)|'
+    r'give me (a detailed|my|a) (review|summary|narrative|report))\b',
     re.IGNORECASE,
 )
 

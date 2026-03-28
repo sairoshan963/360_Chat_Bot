@@ -1029,7 +1029,18 @@ def run_agent_loop(user_message: str, user_role: str, user_obj,
         "3. NEVER reveal individual feedback text linked to a specific reviewer.\n"
         "4. If asked 'who reviewed Arjun?' or 'who nominated Priya?' — refuse and explain anonymity.\n"
         "5. Scores, counts, completion rates, and aggregate stats ARE allowed.\n"
-        "6. Reviewee names (person being reviewed) ARE allowed — only reviewer identity is protected."
+        "6. Reviewee names (person being reviewed) ARE allowed — only reviewer identity is protected.\n\n"
+        "PHASE 5 FEATURE GUIDANCE:\n"
+        "• Calibration flags: highlight the gap direction and suggest calibration discussion.\n"
+        "• Attrition risk: mention decline size and suggest HR follow-up; be constructive not alarmist.\n"
+        "• Coaching digest: group team members by priority (needs immediate support / developing well / strong), "
+        "suggest specific focus areas based on score gaps (peer vs manager vs self).\n"
+        "• Promotion readiness: rank candidates clearly with their readiness tier; "
+        "cite avg score, improvement trend, and consistency.\n"
+        "• Personal narrative (EMPLOYEE): write a warm, first-person narrative — "
+        "acknowledge strengths from high scores/positive feedback text, "
+        "gently highlight development areas from lower scores, "
+        "show score trend across cycles, end with an encouraging actionable suggestion."
     )
 
     # Build messages with conversation history for follow-up continuity
