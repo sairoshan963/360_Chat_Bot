@@ -709,11 +709,12 @@ def _format_context_as_text(context_data: dict) -> str:
     return "\n".join(parts) if parts else "No data available for this query."
 
 
-def generate_data_analysis_stream(user_question: str, context_data: dict, user_role: str):
+def generate_data_analysis_stream(user_question: str, context_data: dict, user_role: str, chat_history: list = None):
     """
     Stream a data-driven analytical response using live DB context.
     The LLM receives real numbers/feedback from the DB and answers grounded in that data.
     Reviewer identities are never included in context_data — anonymity is preserved.
+    chat_history: last N {role, content} exchanges from Redis — injected for follow-up continuity.
     """
     api_key = _get_api_key()
     if not api_key:
@@ -731,11 +732,21 @@ def generate_data_analysis_stream(user_question: str, context_data: dict, user_r
         "3. For cross-cycle comparisons: highlight the delta and what it means.\n"
         "4. Never reveal reviewer identities — all feedback is anonymized.\n"
         "5. If data is missing or incomplete, say so clearly rather than guessing.\n"
-        "6. Keep the response clear and professional. Use bullet points where helpful.\n\n"
+        "6. Keep the response clear and professional. Use bullet points where helpful.\n"
+        "7. If the user is asking a follow-up question about a previous response, use the conversation history.\n\n"
         f"Live Database Context:\n{json.dumps(context_data, indent=2, default=str)}\n\n"
-        f"User Question: {user_question}\n\n"
         "Provide a clear, data-driven analysis:"
     )
+
+    # Build message list with conversation history injected
+    messages = [{"role": "system", "content": system_prompt}]
+    if chat_history:
+        for entry in chat_history[-6:]:
+            role = entry.get("role", "user")
+            content = entry.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content[:600]})
+    messages.append({"role": "user", "content": user_question})
 
     try:
         response = requests.post(
@@ -746,7 +757,7 @@ def generate_data_analysis_stream(user_question: str, context_data: dict, user_r
             },
             json={
                 "model": COHERE_MODEL,
-                "messages": [{"role": "user", "content": system_prompt}],
+                "messages": messages,
                 "stream": True,
             },
             timeout=45,
@@ -981,7 +992,7 @@ def generate_suggestions(question: str, user_role: str) -> list[str]:
 
 
 def run_agent_loop(user_message: str, user_role: str, user_obj,
-                   max_iterations: int = 4, tool_definitions=None) -> str:
+                   max_iterations: int = 4, tool_definitions=None, chat_history: list = None) -> str:
     """
     Level-2 tool-calling agent loop.
     The LLM decides which read-only tools to call, gets results back,
@@ -1014,10 +1025,15 @@ def run_agent_loop(user_message: str, user_role: str, user_obj,
         "Do not include the raw 'Analyzing your data...' prefix in your response."
     )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": user_message},
-    ]
+    # Build messages with conversation history for follow-up continuity
+    messages = [{"role": "system", "content": system_prompt}]
+    if chat_history:
+        for entry in chat_history[-6:]:
+            role = entry.get("role", "user")
+            content = entry.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content[:600]})
+    messages.append({"role": "user", "content": user_message})
 
     for _ in range(max_iterations):
         try:

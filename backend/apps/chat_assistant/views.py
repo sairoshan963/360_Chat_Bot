@@ -646,6 +646,40 @@ def _run_pipeline(user, message, display_message, session_id):
                 "needs_input":    False,
             }
 
+        # ── App knowledge: questions about how the app works ─────────────────
+        from .app_knowledge import is_app_knowledge_question, get_static_answer
+        if is_app_knowledge_question(message):
+            logger.debug("  APP FAQ : routing to app knowledge layer")
+            _static = get_static_answer(message)
+            if _static:
+                # Option A: instant static answer, no LLM
+                chat_logger.log_interaction(
+                    user, session_id, display_message or message,
+                    'app_knowledge', {}, 'success', _static, False, response_data={},
+                )
+                session_manager.append_chat_history(str(user.id), 'assistant', _static)
+                return {
+                    "session_id":  session_id,
+                    "intent":      "app_knowledge",
+                    "status":      "success",
+                    "message":     _static,
+                    "data":        {},
+                    "needs_input": False,
+                }
+            # Option B: LLM fallback (command-light) with conversation memory
+            return {
+                "_app_knowledge":    True,
+                "_ak_message":       message,
+                "_log_user":         user,
+                "_log_session":      session_id,
+                "_log_display":      display_message,
+                "session_id":        session_id,
+                "intent":            "app_knowledge",
+                "status":            "clarify",
+                "data":              {},
+                "needs_input":       False,
+            }
+
         # ── Out-of-scope: question is not related to the 360 system ──────────
         _role_hints = {
             'EMPLOYEE':    "your tasks, feedback, nominations, and cycles",
@@ -1241,7 +1275,40 @@ class ChatStreamView(APIView):
         if is_new_session:
             chat_logger.maybe_generate_title(session_id, display_message or message)
 
-        if payload.get("_agent_needed"):
+        if payload.get("_app_knowledge"):
+            # ── App knowledge LLM fallback (Option B) ─────────────────────────
+            ak_message  = payload.pop("_ak_message")
+            log_user    = payload.pop("_log_user")
+            log_session = payload.pop("_log_session")
+            log_display = payload.pop("_log_display")
+            payload.pop("_app_knowledge")
+            _ak_history = session_manager.get_chat_history(str(user.id))
+
+            def stream_app_knowledge():
+                from .app_knowledge import answer_app_question_stream
+                accumulated = ""
+                try:
+                    for chunk in answer_app_question_stream(ak_message, getattr(user, 'role', ''), _ak_history):
+                        accumulated += chunk
+                        yield _sse({"type": "chunk", "text": chunk})
+                except Exception:
+                    accumulated = "I'm here to help with Gamyam 360°. Try asking 'show my tasks' or 'how does nomination work?'"
+                    yield _sse({"type": "chunk", "text": accumulated})
+                finally:
+                    session_manager.release_lock(str(user.id))
+
+                chat_logger.log_interaction(
+                    log_user, log_session, log_display or ak_message,
+                    'app_knowledge', {}, 'success', accumulated, True, response_data={},
+                )
+                session_manager.append_chat_history(str(user.id), 'assistant', accumulated)
+                payload["message"] = accumulated
+                payload["status"]  = "success"
+                yield _sse({"type": "done", **payload})
+
+            resp = StreamingHttpResponse(stream_app_knowledge(), content_type="text/event-stream")
+
+        elif payload.get("_agent_needed"):
             # ── Level-2 tool-calling agent ─────────────────────────────────────
             agent_message   = payload.pop("_agent_message")
             employee_mode   = payload.pop("_agent_employee_mode", False)
@@ -1256,6 +1323,8 @@ class ChatStreamView(APIView):
             else:
                 _agent_tools = None  # uses default TOOL_DEFINITIONS
 
+            _agent_history = session_manager.get_chat_history(str(user.id))
+
             def stream_agent():
                 # Emit immediately so user sees activity while agent runs tools
                 yield _sse({"type": "chunk", "text": "Analyzing your data...\n\n"})
@@ -1265,6 +1334,7 @@ class ChatStreamView(APIView):
                         getattr(user, 'role', ''),
                         user,
                         tool_definitions=_agent_tools,
+                        chat_history=_agent_history,
                     )
                 except Exception:
                     response = "I was unable to complete the analysis. Please try again."
@@ -1437,13 +1507,16 @@ class ChatStreamView(APIView):
             is_data_analysis = payload.pop("_data_analysis", False)
             payload.pop("_llm_needed")
 
+            _llm_history = session_manager.get_chat_history(str(user.id))
+
             def stream_llm():
                 accumulated = ""
                 try:
                     if is_data_analysis:
                         stream_gen = llm_service.generate_data_analysis_stream(
                             llm_user_message, llm_system_data,
-                            getattr(user, 'role', 'SUPER_ADMIN')
+                            getattr(user, 'role', 'SUPER_ADMIN'),
+                            chat_history=_llm_history,
                         )
                     else:
                         stream_gen = llm_service.generate_response_stream(llm_user_message, llm_system_data)
