@@ -28,6 +28,7 @@ const CAPABILITIES = {
       { icon: '📝', text: 'Explain my results (AI narrative)' },
       { icon: '💡', text: 'My strengths and weaknesses' },
       { icon: '📈', text: 'Summarize my performance' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Fill feedback form', goto: 'My Tasks page' },
@@ -53,6 +54,7 @@ const CAPABILITIES = {
       { icon: '🎯', text: 'Who needs coaching?' },
       { icon: '⚖️', text: 'Show calibration issues (score gaps)' },
       { icon: '📉', text: 'Show attrition risk (declining scores)' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Approve nominations', goto: 'Nominations page' },
@@ -82,6 +84,7 @@ const CAPABILITIES = {
       { icon: '📉', text: 'Show attrition risk' },
       { icon: '🎯', text: 'Coaching digest for my team' },
       { icon: '🏅', text: 'Who is ready for promotion?' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Full cycle configuration', goto: 'Cycles page' },
@@ -116,6 +119,7 @@ const CAPABILITIES = {
       { icon: '📉', text: 'Show attrition risk' },
       { icon: '🎯', text: 'Coaching digest for a team' },
       { icon: '🏅', text: 'Who is ready for promotion?' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Manage users', goto: 'Admin → Users page' },
@@ -1510,15 +1514,21 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
   const [isOnline,          setIsOnline]          = useState(navigator.onLine);
   const [waitingField,      setWaitingField]      = useState(null); // current slot being filled
   const [showPalette,       setShowPalette]       = useState(false);
-  const bottomRef  = useRef(null);
-  const inputRef      = useRef(null);
-  const inputHistory  = useRef([]);   // sent messages, newest first
-  const historyIdx    = useRef(-1);   // -1 = not browsing history
-  const navigate   = useNavigate();
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionUsers, setMentionUsers] = useState([]);
+  const [mentionIdx,   setMentionIdx]   = useState(0);
+
+  const bottomRef      = useRef(null);
+  const inputRef       = useRef(null);
+  const inputHistory   = useRef([]);   // sent messages, newest first
+  const historyIdx     = useRef(-1);   // -1 = not browsing history
+  const navigate       = useNavigate();
   const retryCountRef  = useRef(0);
   const bcRef          = useRef(null);   // BroadcastChannel for cross-tab sync
   const fileInputRef   = useRef(null);   // Hidden file input for PDF upload
   const isSendingRef   = useRef(false);  // Immediate guard against double-send
+  const mentionDebounce = useRef(null);
+  const mentionMap      = useRef({}); // name → email, for resolving @Name on send
 
   // Cross-tab sync: listen for messages sent in ChatPage and reload if same session
   useEffect(() => {
@@ -1793,11 +1803,34 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
     if (!open && role === 'assistant') onNewUnread?.();
   };
 
+  const handleMentionSelect = (u) => {
+    const inp    = inputRef.current?.input;
+    const cursor = inp?.selectionStart ?? input.length;
+    const before = input.slice(0, cursor);
+    const after  = input.slice(cursor);
+    const mention   = `@${u.name}`;
+    mentionMap.current[u.name] = u.email;
+    const newBefore = before.replace(/@\w*$/, mention);
+    setInput(newBefore + after);
+    setMentionQuery(null);
+    setMentionUsers([]);
+    clearTimeout(mentionDebounce.current);
+    setTimeout(() => {
+      if (inp) { const pos = newBefore.length; inp.setSelectionRange(pos, pos); }
+      inputRef.current?.focus();
+    }, 0);
+  };
+
   const handleSend = async (text, displayOverride) => {
     // text can be a string (typed/suggested) or {id, label} (picker click)
-    const isPick = text && typeof text === 'object' && text.id;
-    const msg    = isPick ? text.id : (text || input).trim();
-    const label  = displayOverride || (isPick ? text.label : msg);
+    const isPick  = text && typeof text === 'object' && text.id;
+    const rawMsg  = isPick ? text.id : (text || input).trim();
+    // Replace @Name with email for backend, keep @Name for display
+    const msg     = rawMsg.replace(/@([\w\s]+?)(?=\s|$|[^a-zA-Z\s])/g, (match, name) => {
+      const trimmed = name.trim();
+      return mentionMap.current[trimmed] ? mentionMap.current[trimmed] : match;
+    });
+    const label   = displayOverride || (isPick ? text.label : rawMsg);
     if (!msg || loading || isSendingRef.current) return;
     isSendingRef.current = true;
     setInput('');
@@ -2348,7 +2381,29 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
           )}
 
           {/* Input — hidden when history or info panel is showing */}
-          <div style={{ padding: '10px 14px 14px', borderTop: messages.length > 0 && !loading && !awaitConfirm && !showInfo && !showHistory ? 'none' : '1px solid #f1f5f9', background: '#fff', flexShrink: 0, display: showHistory ? 'none' : undefined }}>
+          <div style={{ padding: '10px 14px 14px', borderTop: messages.length > 0 && !loading && !awaitConfirm && !showInfo && !showHistory ? 'none' : '1px solid #f1f5f9', background: '#fff', flexShrink: 0, display: showHistory ? 'none' : undefined, position: 'relative' }}>
+            {/* @ mention dropdown */}
+            {mentionQuery !== null && mentionUsers.length > 0 && (
+              <div style={{ position: 'absolute', bottom: 'calc(100% - 8px)', left: 14, right: 14, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 4px 24px rgba(0,0,0,0.13)', zIndex: 1000, overflow: 'hidden' }}>
+                <div style={{ padding: '5px 12px 3px', fontSize: 10, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', borderBottom: '1px solid #f1f5f9' }}>PEOPLE</div>
+                {mentionUsers.map((u, i) => (
+                  <div key={u.id}
+                    onMouseDown={(e) => { e.preventDefault(); handleMentionSelect(u); }}
+                    onMouseEnter={() => setMentionIdx(i)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 12px', cursor: 'pointer', background: i === mentionIdx ? '#f0f4ff' : 'transparent', transition: 'background 0.1s' }}
+                  >
+                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#667eea', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12, color: '#fff', fontWeight: 700, overflow: 'hidden' }}>
+                      {u.avatar_url ? <img src={u.avatar_url} style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover' }} alt="" /> : u.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>{u.name}</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                    </div>
+                    <div style={{ fontSize: 9, color: '#cbd5e1', textTransform: 'uppercase', flexShrink: 0 }}>{u.role.replace(/_/g, ' ')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{
               display: 'flex', gap: 8, alignItems: 'center',
               background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: 14,
@@ -2362,16 +2417,50 @@ export default function ChatWidget({ open, onClose, onNewUnread }) {
               <Input
                 ref={inputRef}
                 value={input}
-                onChange={(e) => { setInput(e.target.value); historyIdx.current = -1; }}
-                onPressEnter={() => !awaitConfirm && handleSend()}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInput(val);
+                  historyIdx.current = -1;
+                  const cursor = e.target.selectionStart ?? val.length;
+                  const before = val.slice(0, cursor);
+                  const m = before.match(/@(\w{0,40})$/);
+                  if (m) {
+                    const q = m[1];
+                    setMentionIdx(0);
+                    clearTimeout(mentionDebounce.current);
+                    mentionDebounce.current = setTimeout(async () => {
+                      try {
+                        const token = localStorage.getItem('access_token');
+                        const res = await fetch(`/api/v1/chat/mention-search/?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${token}` } });
+                        const data = await res.json();
+                        setMentionUsers(data.users || []);
+                        setMentionQuery(q);
+                      } catch { /* ignore */ }
+                    }, 150);
+                  } else {
+                    clearTimeout(mentionDebounce.current);
+                    setMentionQuery(null);
+                    setMentionUsers([]);
+                  }
+                }}
+                onPressEnter={() => {
+                  if (mentionQuery !== null && mentionUsers.length > 0) { handleMentionSelect(mentionUsers[mentionIdx]); return; }
+                  if (!awaitConfirm) handleSend();
+                }}
                 onKeyDown={(e) => {
+                  if (mentionQuery !== null && mentionUsers.length > 0) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, mentionUsers.length - 1)); return; }
+                    if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return; }
+                    if (e.key === 'Tab')       { e.preventDefault(); handleMentionSelect(mentionUsers[mentionIdx]); return; }
+                    if (e.key === 'Escape')    { setMentionQuery(null); setMentionUsers([]); return; }
+                  }
                   const hist = inputHistory.current;
-                  if (e.key === 'ArrowUp' && hist.length > 0 && !awaitConfirm) {
+                  if (e.key === 'ArrowUp' && hist.length > 0 && !awaitConfirm && mentionQuery === null) {
                     e.preventDefault();
                     const idx = Math.min(historyIdx.current + 1, hist.length - 1);
                     historyIdx.current = idx;
                     setInput(hist[idx]);
-                  } else if (e.key === 'ArrowDown' && !awaitConfirm) {
+                  } else if (e.key === 'ArrowDown' && !awaitConfirm && mentionQuery === null) {
                     e.preventDefault();
                     const idx = historyIdx.current - 1;
                     historyIdx.current = Math.max(idx, -1);

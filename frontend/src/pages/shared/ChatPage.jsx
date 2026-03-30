@@ -28,6 +28,7 @@ const CAPABILITIES = {
       { icon: '📝', text: 'Explain my results (AI narrative)' },
       { icon: '💡', text: 'My strengths and weaknesses' },
       { icon: '📈', text: 'Summarize my performance' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Fill feedback form (rating questions)', goto: 'My Tasks page' },
@@ -50,6 +51,7 @@ const CAPABILITIES = {
       { icon: '🎯', text: 'Who needs coaching?' },
       { icon: '⚖️', text: 'Show calibration issues (score gaps)' },
       { icon: '📉', text: 'Show attrition risk (declining scores)' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Approve / reject nominations', goto: 'Nominations page' },
@@ -76,6 +78,7 @@ const CAPABILITIES = {
       { icon: '📉', text: 'Show attrition risk' },
       { icon: '🎯', text: 'Coaching digest for my team' },
       { icon: '🏅', text: 'Who is ready for promotion?' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Full cycle configuration (participants, settings)', goto: 'Cycles page' },
@@ -106,6 +109,7 @@ const CAPABILITIES = {
       { icon: '📉', text: 'Show attrition risk' },
       { icon: '🎯', text: 'Coaching digest for a team' },
       { icon: '🏅', text: 'Who is ready for promotion?' },
+      { icon: '✏️', text: 'Update my display name / first name' },
     ],
     cannot: [
       { text: 'Manage users (create, deactivate)', goto: 'Admin → Users page' },
@@ -146,7 +150,7 @@ const ROLE_SUGGESTIONS = {
     { label: 'Explain my results',        icon: '📝' },
     { label: 'Catch me up on everything', icon: '⚡' },
     { label: 'My strengths and weaknesses', icon: '💡' },
-    { label: 'Show cycle deadlines',      icon: '📅' },
+    { label: 'Update my display name',    icon: '✏️' },
   ],
   MANAGER: [
     { label: 'Show team summary',         icon: '👥' },
@@ -1243,13 +1247,19 @@ export default function ChatPage() {
   const [pinnedIds,          setPinnedIds]          = useState(() => {
     try { return JSON.parse(localStorage.getItem('chat_pinned_sessions') || '[]'); } catch { return []; }
   });
-  const navigate      = useNavigate();
-  const bottomRef     = useRef(null);
-  const inputRef      = useRef(null);
-  const fileInputRef  = useRef(null);
-  const retryCountRef = useRef(0);
-  const bcRef         = useRef(null);   // BroadcastChannel for cross-tab sync
-  const isSendingRef  = useRef(false);  // Immediate guard against double-send
+  const [mentionQuery, setMentionQuery] = useState(null); // null = picker hidden
+  const [mentionUsers, setMentionUsers] = useState([]);
+  const [mentionIdx,   setMentionIdx]   = useState(0);
+
+  const navigate         = useNavigate();
+  const bottomRef        = useRef(null);
+  const inputRef         = useRef(null);
+  const fileInputRef     = useRef(null);
+  const retryCountRef    = useRef(0);
+  const bcRef            = useRef(null);   // BroadcastChannel for cross-tab sync
+  const isSendingRef     = useRef(false);  // Immediate guard against double-send
+  const mentionDebounce  = useRef(null);
+  const mentionMap       = useRef({}); // name → email, for resolving @Name on send
 
   // Cross-tab sync: listen for messages sent in ChatWidget and reload if same session
   useEffect(() => {
@@ -1376,10 +1386,33 @@ export default function ChatPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleMentionSelect = (u) => {
+    const ta     = inputRef.current?.resizableTextArea?.textArea;
+    const cursor = ta?.selectionStart ?? input.length;
+    const before = input.slice(0, cursor);
+    const after  = input.slice(cursor);
+    const mention   = `@${u.name}`;
+    mentionMap.current[u.name] = u.email;
+    const newBefore = before.replace(/@\w*$/, mention);
+    setInput(newBefore + after);
+    setMentionQuery(null);
+    setMentionUsers([]);
+    clearTimeout(mentionDebounce.current);
+    setTimeout(() => {
+      if (ta) { const pos = newBefore.length; ta.setSelectionRange(pos, pos); }
+      inputRef.current?.focus();
+    }, 0);
+  };
+
   const handleSend = async (text, displayOverride) => {
-    const isPick = text && typeof text === 'object' && text.id;
-    const msg    = isPick ? text.id : (text || input).trim();
-    const label  = displayOverride || (isPick ? text.label : msg);
+    const isPick  = text && typeof text === 'object' && text.id;
+    const rawMsg  = isPick ? text.id : (text || input).trim();
+    // Replace @Name with email for backend, keep @Name for display
+    const msg     = rawMsg.replace(/@([\w\s]+?)(?=\s|$|[^a-zA-Z\s])/g, (match, name) => {
+      const trimmed = name.trim();
+      return mentionMap.current[trimmed] ? mentionMap.current[trimmed] : match;
+    });
+    const label   = displayOverride || (isPick ? text.label : rawMsg);
     if (!msg || loading || isSendingRef.current) return;
     isSendingRef.current = true;
     setInput('');
@@ -1910,18 +1943,72 @@ export default function ChatPage() {
             )}
 
             {/* Input */}
-            <div style={{ padding: '12px 24px 16px' }}>
+            <div style={{ padding: '12px 24px 16px', position: 'relative' }}>
+              {/* @ mention dropdown */}
+              {mentionQuery !== null && mentionUsers.length > 0 && (
+                <div style={{ position: 'absolute', bottom: 'calc(100% - 8px)', left: 24, right: 24, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 4px 24px rgba(0,0,0,0.13)', zIndex: 1000, overflow: 'hidden' }}>
+                  <div style={{ padding: '6px 14px 4px', fontSize: 11, color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', borderBottom: '1px solid #f1f5f9' }}>PEOPLE</div>
+                  {mentionUsers.map((u, i) => (
+                    <div key={u.id}
+                      onMouseDown={(e) => { e.preventDefault(); handleMentionSelect(u); }}
+                      onMouseEnter={() => setMentionIdx(i)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', cursor: 'pointer', background: i === mentionIdx ? '#f0f4ff' : 'transparent', transition: 'background 0.1s' }}
+                    >
+                      <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#667eea', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 13, color: '#fff', fontWeight: 700, overflow: 'hidden' }}>
+                        {u.avatar_url ? <img src={u.avatar_url} style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover' }} alt="" /> : u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{u.name}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#cbd5e1', textTransform: 'uppercase', flexShrink: 0 }}>{u.role.replace(/_/g, ' ')}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 16, padding: '10px 10px 10px 16px', display: 'flex', gap: 8, alignItems: 'center', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', transition: 'border-color 0.2s' }}
                 onFocusCapture={(e) => e.currentTarget.style.borderColor = '#667eea'}
-                onBlurCapture={(e) => e.currentTarget.style.borderColor = '#e2e8f0'}
+                onBlurCapture={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; }}
               >
                 {/* Hidden file input */}
                 <input ref={fileInputRef} type="file" accept=".pdf,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
                 <Input.TextArea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !awaitConfirm) { e.preventDefault(); handleSend(); } }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setInput(val);
+                    const cursor = e.target.selectionStart ?? val.length;
+                    const before = val.slice(0, cursor);
+                    const m = before.match(/@(\w{0,40})$/);
+                    if (m) {
+                      const q = m[1];
+                      setMentionIdx(0);
+                      clearTimeout(mentionDebounce.current);
+                      mentionDebounce.current = setTimeout(async () => {
+                        try {
+                          const token = localStorage.getItem('access_token');
+                          const res = await fetch(`/api/v1/chat/mention-search/?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${token}` } });
+                          const data = await res.json();
+                          setMentionUsers(data.users || []);
+                          setMentionQuery(q);
+                        } catch { /* ignore */ }
+                      }, 150);
+                    } else {
+                      clearTimeout(mentionDebounce.current);
+                      setMentionQuery(null);
+                      setMentionUsers([]);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (mentionQuery !== null && mentionUsers.length > 0) {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, mentionUsers.length - 1)); return; }
+                      if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return; }
+                      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handleMentionSelect(mentionUsers[mentionIdx]); return; }
+                      if (e.key === 'Escape')    { setMentionQuery(null); setMentionUsers([]); return; }
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey && !awaitConfirm) { e.preventDefault(); handleSend(); }
+                  }}
                   placeholder={awaitConfirm ? 'Please confirm or cancel the action above…' : voiceListening ? 'Listening…' : 'Ask anything… (Enter to send, Shift+Enter for new line)'}
                   autoSize={{ minRows: 1, maxRows: 5 }}
                   disabled={loading || awaitConfirm}

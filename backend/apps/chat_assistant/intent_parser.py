@@ -22,6 +22,14 @@ RULE_PATTERNS = [
     (r'\bwhat\b.*\bcommand[s]?\b',                             'help'),
     (r'\bhow\b.*\bdoes\b.*\bthis\b.*\bwork\b',                 'help'),
 
+    # ── show_user_profile (must be before show_my_profile) ────────────────────
+    # Matches "profile of X@email", "details of X@email", "show X@email profile"
+    (r'\bprofile\b.*\bof\b.*@',                                'show_user_profile'),
+    (r'\bdetails\b.*\bof\b.*@',                                'show_user_profile'),
+    (r'\bshow\b.*\bprofile\b.*@',                              'show_user_profile'),
+    (r'\bshow\b.*\bdetails\b.*@',                              'show_user_profile'),
+    (r'@\S+\s+profile',                                        'show_user_profile'),
+
     # ── show_my_profile ───────────────────────────────────────────────────────
     # MUST come before show_my_manager and show_my_team to avoid partial matches.
     (r'\bshow\b.*\bmy\b.*\bprofile\b',                         'show_my_profile'),
@@ -417,6 +425,7 @@ _FUZZY_CANONICAL = {
     'show_team_summary':      ['show team summary', 'team summary', 'team overview', 'how is my team performing', 'team performance', 'direct reports scores'],
     'show_team_nominations':  ['show team nominations', 'team nominations', 'pending nominations'],
     'show_pending_reviews':   ['show pending reviews', 'pending reviews', 'reviews i need to complete', 'who do i need to review'],
+    'show_user_profile':      ['profile of user', 'show profile of', 'details of user', 'show user profile'],
     'show_my_profile':        ['show my profile', 'my profile', 'my details', 'who am i'],
     'show_my_manager':        ['show my manager', 'my manager', 'who is my manager', 'who do i report to', 'my boss', 'who is my boss'],
     'show_my_team':           ['show my team', 'my team', 'direct reports'],
@@ -593,27 +602,26 @@ def _extract_inline_params(intent: str, message: str) -> dict:
         else:
             params['content'] = rest
 
-    elif intent == 'show_my_cycles':
-        # Extract optional state filter: "active", "nomination", "closed", "draft", "released"
-        _STATE_WORDS = {
-            'active':   'ACTIVE',
-            'nomination': 'NOMINATION',
-            'closed':   'CLOSED',
-            'draft':    'DRAFT',
-            'results released': 'RESULTS_RELEASED',
-            'released': 'RESULTS_RELEASED',
-            'releases': 'RESULTS_RELEASED',
-            'result':   'RESULTS_RELEASED',
-            'results released': 'RESULTS_RELEASED',
-            'archived': 'ARCHIVED',
-            'cancelled': 'ARCHIVED',
-            'finalized': 'FINALIZED',
-        }
-        msg_lower = message.lower()
-        for word, state in _STATE_WORDS.items():
-            if word in msg_lower:
-                params['state_filter'] = state
-                break
+    elif intent in ('show_my_cycles', 'show_cycle_status'):
+        # Parameters are extracted by LLM tool calling (state_filter, cycle_name).
+        # Regex fallback: only used when LLM is unavailable.
+        if not params.get('state_filter'):
+            _STATE_WORDS = {
+                'active': 'ACTIVE', 'nomination': 'NOMINATION', 'closed': 'CLOSED',
+                'draft': 'DRAFT', 'released': 'RESULTS_RELEASED', 'result': 'RESULTS_RELEASED',
+                'archived': 'ARCHIVED', 'cancelled': 'ARCHIVED', 'finalized': 'FINALIZED',
+            }
+            msg_lower = message.lower()
+            for word, state in _STATE_WORDS.items():
+                if word in msg_lower:
+                    params['state_filter'] = state
+                    break
+
+    elif intent == 'show_user_profile':
+        # Extract email from message
+        emails = re.findall(r'[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}', message)
+        if emails:
+            params['email'] = emails[0]
 
     elif intent == 'reject_nomination':
         # Extract rejection reason from phrases like:
@@ -682,42 +690,28 @@ def parse_intent(user_message: str, conversation_context: str = '', conversation
             logger.debug("Pre-LLM high-confidence match: %s for %r", intent, user_message[:60])
             return {"intent": intent, "parameters": params, "used_llm": False}
 
-    # ── Step 1: LLM tool calling (primary path) ───────────────────────────────
+    # ── Step 1: LLM tool calling — PRIMARY path, always used ─────────────────
+    # LLM understands full context, extracts intent + all parameters in one shot.
     api_key = llm_service._get_api_key()
     if api_key:
-        logger.debug("Phase3: using LLM tool-call for: %r", user_message)
+        logger.debug("LLM tool-call (primary): %r", user_message)
         result = llm_service.detect_intent_tool_call(user_message, conversation_context, conversation_history)
         result["used_llm"] = True
         if result.get("intent") and result["intent"] != "unknown":
             return result
-        # LLM returned unknown (rate-limited, timeout, or genuinely unknown) —
-        # try regex patterns before falling back to fuzzy "did you mean?"
-        # Normalize newlines → space so multi-line messages match single-line patterns
-        lower = user_message.lower().replace('\n', ' ').replace('\r', ' ')
-        for pattern, intent in RULE_PATTERNS:
-            if re.search(pattern, lower):
-                logger.debug("Regex fallback (post-LLM) matched: %s for %r", intent, user_message)
-                params = _extract_inline_params(intent, user_message)
-                return {"intent": intent, "parameters": params, "used_llm": True}
-        # Regex also found nothing — check fuzzy for "did you mean?" suggestion
-        fz_intent, fz_score, fz_phrase = fuzzy_match_intent(user_message)
-        if fz_score >= 0.30 and fz_intent:
-            return {
-                "intent":            "UNKNOWN",
-                "parameters":        {},
-                "used_llm":          True,
-                "suggestion":        fz_intent,
-                "suggestion_phrase": fz_phrase,
-            }
-        return result
+        # LLM returned unknown (rate-limited or genuinely unclear) —
+        # fall back to regex + fuzzy before giving up.
+        logger.debug("LLM returned unknown — trying regex/fuzzy fallback")
 
-    # ── Step 2: Regex fallback (when Cohere API key is missing entirely) ──────
-    logger.warning("Cohere API key missing — falling back to regex intent detection.")
-    # Normalize newlines → space so multi-line messages match single-line patterns
+    else:
+        logger.warning("Cohere API key missing — skipping LLM, using regex intent detection.")
+
+    # ── Step 2: Regex + fuzzy fallback ───────────────────────────────────────
+    # Used when: (a) API key is missing, or (b) LLM returned unknown/failed.
     lower = user_message.lower().replace('\n', ' ').replace('\r', ' ')
     for pattern, intent in RULE_PATTERNS:
         if re.search(pattern, lower):
-            logger.debug("Regex fallback matched: %s for %r", intent, user_message)
+            logger.debug("Regex fallback matched: %s for %r", intent, user_message[:80])
             params = _extract_inline_params(intent, user_message)
             return {"intent": intent, "parameters": params, "used_llm": False}
 

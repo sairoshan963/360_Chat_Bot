@@ -290,9 +290,9 @@ class ChatMessageView(APIView):
             payload.pop("_llm_needed")
             try:
                 llm_reply    = llm_service.generate_response(llm_user_message, llm_system_data)
-                response_msg = llm_reply if llm_reply else llm_fallback
+                response_msg = llm_reply if llm_reply and 'unable' not in llm_reply.lower() else _build_status_summary(llm_system_data.get('data', {}))
             except Exception:
-                response_msg = llm_fallback
+                response_msg = _build_status_summary(llm_system_data.get('data', {}))
             chat_logger.log_interaction(
                 log_user, log_session, log_display,
                 'unknown', {}, 'clarify', response_msg, log_used_llm,
@@ -301,6 +301,33 @@ class ChatMessageView(APIView):
             payload["message"] = response_msg
 
         return Response(payload)
+
+
+def _build_status_summary(data: dict) -> str:
+    """Template-based fallback for summarize_my_status when LLM is unavailable."""
+    lines = []
+    cycles = data.get('cycles', {}).get('cycles', [])
+    active = [c for c in cycles if c.get('state') == 'ACTIVE']
+    if active:
+        lines.append(f"You have {len(active)} active cycle(s): {', '.join(c['name'] for c in active)}.")
+    tasks = data.get('tasks', {}).get('grouped_tasks', [])
+    pending_tasks = sum(
+        1 for g in tasks for t in g.get('tasks', []) if t.get('status') not in ('SUBMITTED',)
+    )
+    if pending_tasks:
+        lines.append(f"You have {pending_tasks} pending review task(s) to complete.")
+    else:
+        lines.append("All your review tasks are submitted.")
+    noms = data.get('nominations', {}).get('grouped_nominations', [])
+    if noms:
+        total_noms = sum(len(g.get('nominations', [])) for g in noms)
+        lines.append(f"You have {total_noms} peer nomination(s) across {len(noms)} cycle(s).")
+    deadline = data.get('next_deadline', {}).get('next_deadline')
+    if deadline:
+        lines.append(f"Next deadline: {deadline.get('cycle_name')} on {deadline.get('deadline_date')}.")
+    if not lines:
+        lines.append("No active cycles or pending tasks at the moment.")
+    return ' '.join(lines)
 
 
 def _run_pipeline(user, message, display_message, session_id):
@@ -472,15 +499,31 @@ def _run_pipeline(user, message, display_message, session_id):
                 "needs_input":          False,
             }
 
-    # ── Phase 4: Early data-analysis bypass (SUPER_ADMIN / HR_ADMIN only) ───
-    # Must happen BEFORE intent detection so the intent parser cannot intercept
-    # data analysis questions and misclassify them as known commands.
-    if (not session.get('intent') and not session.get('awaiting_confirm') and
+    # ── PIPELINE STAGE 3: Intent detection (LLM-first) ───────────────────
+    conversation_context  = session.get('context', '')
+    conversation_history  = session_manager.get_chat_history(str(user.id))
+    parsed = intent_parser.parse_intent(message, conversation_context, conversation_history)
+    intent    = parsed['intent']
+    params    = parsed['parameters']
+    used_llm  = parsed.get('used_llm', False)
+    logger.debug(
+        "  INTENT  : %s  [%s]%s",
+        intent,
+        "LLM" if used_llm else "rule-based",
+        f"  params={params}" if params else "",
+    )
+
+    # ── Phase 4: Data-analysis bypass (SUPER_ADMIN / HR_ADMIN only) ──────
+    # Only activates when LLM intent detection returns 'unknown' — i.e., the
+    # question is not a recognised command.  Known intents (like show_user_profile)
+    # are handled by the command pipeline above.
+    if (intent == 'unknown' and
+            not session.get('intent') and not session.get('awaiting_confirm') and
             _user_role in ('SUPER_ADMIN', 'HR_ADMIN') and
             data_context_fetcher.is_strong_data_analysis_question(message)):
         _ctx = data_context_fetcher.fetch_context(user, message)
         if _ctx:
-            logger.debug("  DATA CTX  : early bypass — context types=%s", list(_ctx.keys()))
+            logger.debug("  DATA CTX  : data-analysis bypass — context types=%s", list(_ctx.keys()))
             return {
                 "_llm_needed":       True,
                 "_data_analysis":    True,
@@ -497,21 +540,7 @@ def _run_pipeline(user, message, display_message, session_id):
                 "data":              {},
                 "needs_input":       False,
             }
-    # ── End Phase 4 early bypass ─────────────────────────────────────────────
-
-    # ── PIPELINE STAGE 3: Intent detection ───────────────────────────────
-    conversation_context  = session.get('context', '')
-    conversation_history  = session_manager.get_chat_history(str(user.id))
-    parsed = intent_parser.parse_intent(message, conversation_context, conversation_history)
-    intent    = parsed['intent']
-    params    = parsed['parameters']
-    used_llm  = parsed.get('used_llm', False)
-    logger.debug(
-        "  INTENT  : %s  [%s]%s",
-        intent,
-        "LLM" if used_llm else "rule-based",
-        f"  params={params}" if params else "",
-    )
+    # ── End Phase 4 bypass ───────────────────────────────────────────────
 
     # ── PIPELINE STAGE 4: Slot-fill merge ────────────────────────────────
     _awaiting_cycle_id      = session.get('missing_fields', [])[:1] == ['cycle_id']
@@ -1547,15 +1576,23 @@ class ChatStreamView(APIView):
                     else:
                         stream_gen = llm_service.generate_response_stream(llm_user_message, llm_system_data)
                     for chunk in stream_gen:
+                        # If LLM returns an error string, swap with template fallback
+                        if 'unable' in chunk.lower() or 'rate-limited' in chunk.lower():
+                            fallback = _build_status_summary(llm_system_data.get('data', {})) if not is_data_analysis else chunk
+                            accumulated = fallback
+                            yield _sse({"type": "chunk", "text": fallback})
+                            break
                         accumulated += chunk
                         yield _sse({"type": "chunk", "text": chunk})
                 except Exception:
-                    accumulated = llm_fallback
-                    yield _sse({"type": "chunk", "text": llm_fallback})
+                    fallback = _build_status_summary(llm_system_data.get('data', {})) if not is_data_analysis else llm_fallback
+                    accumulated = fallback
+                    yield _sse({"type": "chunk", "text": fallback})
                 finally:
                     session_manager.release_lock(str(user.id))
 
-                response_msg = accumulated or llm_fallback
+                _is_error = not accumulated or 'unable' in accumulated.lower() or 'rate-limited' in accumulated.lower()
+                response_msg = (_build_status_summary(llm_system_data.get('data', {})) if not is_data_analysis else llm_fallback) if _is_error else accumulated
                 chat_logger.log_interaction(
                     log_user, log_session, log_display,
                     "unknown", {}, "clarify", response_msg, log_used_llm,
@@ -2370,3 +2407,40 @@ class ChatUploadView(APIView):
                 if page_text:
                     text_parts.append(page_text)
         return "\n\n".join(text_parts)
+
+
+class MentionSearchView(APIView):
+    """
+    GET /api/v1/chat/mention-search/?q=<query>
+    Returns up to 10 active users matching the query (name or email).
+    Accessible to all authenticated roles — used for the @ mention picker in chat.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.contrib.auth import get_user_model
+        from django.db.models import Q
+        User = get_user_model()
+
+        q = request.query_params.get('q', '').strip()
+        qs = User.objects.filter(status='ACTIVE').exclude(id=request.user.id)
+        if q:
+            qs = qs.filter(
+                Q(email__icontains=q)
+                | Q(first_name__icontains=q)
+                | Q(last_name__icontains=q)
+                | Q(display_name__icontains=q)
+            )
+        qs = qs.select_related('department').order_by('first_name', 'last_name')[:10]
+
+        users = []
+        for u in qs:
+            full_name = f"{u.first_name} {u.last_name}".strip()
+            users.append({
+                'id':         str(u.id),
+                'email':      u.email,
+                'name':       u.display_name or full_name or u.email,
+                'avatar_url': u.avatar_url or '',
+                'role':       u.role,
+            })
+        return Response({'success': True, 'users': users})

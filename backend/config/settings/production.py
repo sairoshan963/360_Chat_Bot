@@ -6,8 +6,8 @@ DEBUG = False
 SECURE_PROXY_SSL_HEADER    = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST       = True
 
-# Security headers and HTTPS enforcement
-SECURE_SSL_REDIRECT           = True
+# SSL redirect handled by Cloudflare — Django must NOT redirect internally
+SECURE_SSL_REDIRECT           = False
 SESSION_COOKIE_SECURE         = True
 CSRF_COOKIE_SECURE            = True
 SECURE_BROWSER_XSS_FILTER     = True

@@ -195,52 +195,53 @@ class ShowCycleStatusCommand(BaseCommand):
 
     def execute(self, parameters: dict, user) -> dict:
         try:
-            cycle_name = parameters.get('cycle_name', '')
+            if parameters.get('invalid_state'):
+                return {
+                    "success": False,
+                    "message": "That's not a valid cycle stage. Valid stages are: Draft, Nomination, Finalized, Active, Closed, Results Released, Archived.",
+                    "data": {}
+                }
+            cycle_name   = parameters.get('cycle_name', '')
+            state_filter = parameters.get('state_filter', '')
             with connection.cursor() as cursor:
                 if user.role in ('HR_ADMIN', 'SUPER_ADMIN'):
-                    # HR/Admin: see all cycles org-wide
+                    where_clauses = []
+                    params = []
                     if cycle_name:
-                        cursor.execute("""
-                            SELECT name, state, review_deadline, nomination_deadline
-                            FROM review_cycles
-                            WHERE LOWER(name) LIKE %s
-                            ORDER BY created_at DESC
-                        """, [f'%{cycle_name.lower()}%'])
-                    else:
-                        cursor.execute("""
-                            SELECT name, state, review_deadline, nomination_deadline
-                            FROM review_cycles
-                            ORDER BY created_at DESC
-                        """)
+                        where_clauses.append("LOWER(name) LIKE %s")
+                        params.append(f'%{cycle_name.lower()}%')
+                    if state_filter:
+                        where_clauses.append("state = %s")
+                        params.append(state_filter)
+                    where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+                    cursor.execute(f"""
+                        SELECT name, state, review_deadline, nomination_deadline
+                        FROM review_cycles
+                        {where}
+                        ORDER BY created_at DESC
+                    """, params)
                 else:
-                    # Manager: only cycles where they or their direct reports participate
+                    where_clauses = []
+                    params = [db_uuid(user.id), db_uuid(user.id)]
                     if cycle_name:
-                        cursor.execute("""
-                            SELECT rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
-                            FROM review_cycles rc
-                            WHERE rc.id IN (
-                                SELECT DISTINCT cp.cycle_id FROM cycle_participants cp
-                                WHERE cp.user_id = %s
-                                   OR cp.user_id IN (
-                                       SELECT employee_id FROM org_hierarchy WHERE manager_id = %s
-                                   )
-                            )
-                            AND LOWER(rc.name) LIKE %s
-                            ORDER BY rc.created_at DESC
-                        """, [db_uuid(user.id), db_uuid(user.id), f'%{cycle_name.lower()}%'])
-                    else:
-                        cursor.execute("""
-                            SELECT rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
-                            FROM review_cycles rc
-                            WHERE rc.id IN (
-                                SELECT DISTINCT cp.cycle_id FROM cycle_participants cp
-                                WHERE cp.user_id = %s
-                                   OR cp.user_id IN (
-                                       SELECT employee_id FROM org_hierarchy WHERE manager_id = %s
-                                   )
-                            )
-                            ORDER BY rc.created_at DESC
-                        """, [db_uuid(user.id), db_uuid(user.id)])
+                        where_clauses.append("LOWER(rc.name) LIKE %s")
+                        params.append(f'%{cycle_name.lower()}%')
+                    if state_filter:
+                        where_clauses.append("rc.state = %s")
+                        params.append(state_filter)
+                    extra = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
+                    cursor.execute(f"""
+                        SELECT rc.name, rc.state, rc.review_deadline, rc.nomination_deadline
+                        FROM review_cycles rc
+                        WHERE rc.id IN (
+                            SELECT DISTINCT cp.cycle_id FROM cycle_participants cp
+                            WHERE cp.user_id = %s
+                               OR cp.user_id IN (
+                                   SELECT employee_id FROM org_hierarchy WHERE manager_id = %s
+                               )
+                        ) {extra}
+                        ORDER BY rc.created_at DESC
+                    """, params)
                 rows = cursor.fetchall()
 
             if not rows:
@@ -255,9 +256,14 @@ class ShowCycleStatusCommand(BaseCommand):
                 }
                 for r in rows
             ]
+            _FRIENDLY = {
+                'DRAFT': 'Draft', 'NOMINATION': 'Nomination', 'FINALIZED': 'Finalized',
+                'ACTIVE': 'Active', 'CLOSED': 'Closed', 'RESULTS_RELEASED': 'Results Released', 'ARCHIVED': 'Archived',
+            }
+            label = f"{_FRIENDLY.get(state_filter, state_filter)} " if state_filter else ""
             return {
                 "success": True,
-                "message": f"Found {len(cycles)} cycle(s).",
+                "message": f"Found {len(cycles)} {label}cycle(s)." if cycles else f"No {label}cycles found.",
                 "data": {"cycles": cycles}
             }
         except Exception as e:
@@ -1074,6 +1080,63 @@ class ShowMyProfileCommand(BaseCommand):
         except Exception as e:
             logger.error(f"ShowMyProfileCommand error: {e}")
             return {"success": False, "message": "Could not retrieve your profile. Please try again.", "data": {}}
+
+
+class ShowUserProfileCommand(BaseCommand):
+    """Show profile details of any user by email (HR/Admin) or own profile."""
+    allowed_roles = ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'SUPER_ADMIN']
+    requires_confirmation = False
+
+    def execute(self, parameters: dict, user) -> dict:
+        try:
+            target_email = parameters.get('email', '').strip().lower()
+            # Employees can only view their own profile via this command
+            if not target_email or target_email == user.email.lower():
+                return ShowMyProfileCommand().execute(parameters, user)
+
+            # Only HR/Admin can view other users' profiles
+            if user.role not in ('HR_ADMIN', 'SUPER_ADMIN', 'MANAGER'):
+                return {"success": False, "message": "You can only view your own profile.", "data": {}}
+
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT u.first_name || ' ' || u.last_name AS name,
+                           u.email, u.role, u.job_title,
+                           COALESCE(d.name, 'N/A') AS department,
+                           u.status,
+                           u.created_at,
+                           mgr.first_name || ' ' || mgr.last_name AS manager_name,
+                           mgr.email AS manager_email
+                    FROM users u
+                    LEFT JOIN departments d ON u.department_id = d.id
+                    LEFT JOIN org_hierarchy oh ON oh.employee_id = u.id
+                    LEFT JOIN users mgr ON oh.manager_id = mgr.id
+                    WHERE LOWER(u.email) = %s
+                """, [target_email])
+                row = cursor.fetchone()
+
+            if not row:
+                return {"success": False, "message": f"No user found with email {target_email}.", "data": {}}
+
+            profile = {
+                "name":          row[0],
+                "email":         row[1],
+                "role":          row[2],
+                "job_title":     row[3] or 'N/A',
+                "department":    row[4],
+                "status":        row[5] or 'N/A',
+                "member_since":  _fmt_date(row[6]),
+                "manager":       row[7] or 'N/A',
+                "manager_email": row[8] or 'N/A',
+            }
+            return {
+                "success": True,
+                "message": f"Profile for {profile['name']}.",
+                "data": {"profile": profile}
+            }
+        except Exception as e:
+            logger.error(f"ShowUserProfileCommand error: {e}")
+            return {"success": False, "message": "Could not retrieve profile. Please try again.", "data": {}}
 
 
 class ShowMyManagerCommand(BaseCommand):

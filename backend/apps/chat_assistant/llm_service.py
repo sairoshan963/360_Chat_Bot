@@ -148,7 +148,21 @@ _INTENT_TOOLS = [
     {"type": "function", "function": {"name": "show_my_feedback",      "description": "Show the current user their received peer feedback summary.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_my_report",        "description": "Show the current user their personal performance report, scores, or results.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_pending_reviews",  "description": "List feedback reviews that the user needs to WRITE and SUBMIT for others (reviewer perspective — writing feedback about peers/team).", "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {"name": "show_cycle_status",     "description": "Show the status of all review cycles in the system.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "show_cycle_status",
+        "description": "Show the status of all review cycles in the system. Optionally filter by a specific state. If user mentions an invalid or unrecognised state, still call this tool but leave state_filter empty — the system will handle the error.",
+        "parameters": {"type": "object", "required": [], "properties": {
+            "state_filter": {
+                "type": "string",
+                "description": "Filter cycles by state. Only use one of these exact values if the user mentions a valid state. Leave empty if state is invalid or not mentioned.",
+                "enum": ["ACTIVE", "NOMINATION", "CLOSED", "DRAFT", "RESULTS_RELEASED", "ARCHIVED", "FINALIZED"],
+            },
+            "cycle_name": {
+                "type": "string",
+                "description": "Filter by cycle name if the user mentions a specific cycle name.",
+            },
+        }},
+    }},
     {"type": "function", "function": {"name": "show_team_summary",     "description": "Show a manager's team feedback overview or summary.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_participation",    "description": "Show participation statistics or completion rates for cycles.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_my_tasks",         "description": "Show all reviewer tasks assigned to the current user — includes PENDING, SUBMITTED, LOCKED tasks across all cycles. Use for 'my tasks', 'tasks assigned to me', 'what tasks do I have'.", "parameters": {"type": "object", "properties": {}, "required": []}}},
@@ -170,7 +184,14 @@ _INTENT_TOOLS = [
     {"type": "function", "function": {"name": "show_employees",        "description": "List all employees in the organisation.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_announcements",    "description": "Show active announcements or latest updates.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_audit_logs",       "description": "Show recent audit logs or activity history.", "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {"name": "show_my_profile",       "description": "Show the current user's profile or personal details.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "show_my_profile",       "description": "Show the current user's own profile or personal details (when no specific user is mentioned).", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "show_user_profile",
+        "description": "Show the profile or details of a specific other user (identified by email address). Use this when the user asks about someone else's profile, e.g. 'show profile of hr2@gamyam.com' or 'details of emp1@gamyam.com'.",
+        "parameters": {"type": "object", "required": [], "properties": {
+            "email": {"type": "string", "description": "The email address of the user whose profile to show."},
+        }},
+    }},
     {"type": "function", "function": {"name": "show_my_manager",       "description": "Show who the current user's manager is.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "show_my_team",          "description": "Show the current manager's direct reports or team members.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "when_is_my_review_due", "description": "Tell the user when their next review is due.", "parameters": {"type": "object", "properties": {}, "required": []}}},
@@ -292,6 +313,25 @@ _INTENT_TOOLS = [
             "'what do I need to do', or 'how am I doing'."
         ),
         "parameters": {"type": "object", "required": [], "properties": {}},
+    }},
+
+    # ── Profile update ────────────────────────────────────────────────────
+    {"type": "function", "function": {
+        "name": "update_profile",
+        "description": (
+            "Update the current user's own profile information. "
+            "Editable fields: first name, middle name, last name, display name. "
+            "Use when user says 'update my name', 'change my display name', 'call me X', "
+            "'set my first name to', 'my nickname is', etc. "
+            "If the user says 'name' without specifying first/middle/last — do NOT guess; "
+            "ask which one they mean before calling this tool."
+        ),
+        "parameters": {"type": "object", "required": [], "properties": {
+            "first_name":   {"type": "string", "description": "New first name"},
+            "middle_name":  {"type": "string", "description": "New middle name"},
+            "last_name":    {"type": "string", "description": "New last name"},
+            "display_name": {"type": "string", "description": "New display name shown across the app. Use when user says 'call me X', 'my nickname', 'display name'"},
+        }},
     }},
 
     # ── Fallback ───────────────────────────────────────────────────────────
@@ -1097,6 +1137,8 @@ def run_agent_loop(user_message: str, user_role: str, user_obj,
 
         except Exception as e:
             logger.error("Agent loop error: %s", e)
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                return "I'm currently rate-limited by the AI service. Please wait a moment and try again."
             break
 
     return "I was unable to complete the analysis. Please try again."

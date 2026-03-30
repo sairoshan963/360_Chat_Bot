@@ -627,6 +627,84 @@ class ApproveAllNominationsCommand(BaseCommand):
             return {"success": False, "message": "Could not bulk approve nominations. Please try again.", "data": {}}
 
 
+class UpdateProfileCommand(BaseCommand):
+    """
+    Allow any user to update their own editable profile fields from chat.
+    Editable: first_name, middle_name, last_name, display_name.
+    Read-only (admin-managed): job_title, email, role.
+
+    LLM handles ambiguity — if user says "update my name to Rosh" without
+    specifying which name field, the LLM asks for clarification before
+    this command is ever called.
+    """
+    allowed_roles         = ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'SUPER_ADMIN']
+    requires_confirmation = True
+    required_params       = []  # LLM fills whichever fields it extracts
+
+    # Fields that are editable via chat
+    EDITABLE_FIELDS = {'first_name', 'middle_name', 'last_name', 'display_name'}
+
+    def validate_params(self, parameters: dict) -> list[str]:
+        """At least one editable field must be present."""
+        has_field = any(parameters.get(f) for f in self.EDITABLE_FIELDS)
+        return [] if has_field else ['field_and_value']
+
+    def execute(self, parameters: dict, user) -> dict:
+        try:
+            from apps.auth_app import services as auth_services
+
+            # Collect which fields are being updated
+            updates = {}
+            for field in self.EDITABLE_FIELDS:
+                val = parameters.get(field)
+                if val is not None:
+                    updates[field] = str(val).strip()
+
+            if not updates:
+                return {
+                    "success": False,
+                    "message": "Please tell me which field to update and the new value.",
+                    "data": {},
+                }
+
+            # Merge with current values (service requires all 5 fields)
+            auth_services.update_profile(
+                user=user,
+                first_name   = updates.get('first_name',   user.first_name  or ''),
+                middle_name  = updates.get('middle_name',  user.middle_name or ''),
+                last_name    = updates.get('last_name',    user.last_name   or ''),
+                display_name = updates.get('display_name', user.display_name or ''),
+                job_title    = user.job_title or '',  # never changed via chat
+            )
+
+            # Build a readable summary of what changed
+            field_labels = {
+                'first_name':   'First name',
+                'last_name':    'Last name',
+                'middle_name':  'Middle name',
+                'display_name': 'Display name',
+            }
+            changed_lines = [f"**{field_labels[f]}** → {v}" for f, v in updates.items()]
+            changed_str   = '\n'.join(changed_lines)
+
+            return {
+                "success": True,
+                "message": (
+                    f"Your profile has been updated:\n{changed_str}\n\n"
+                    "You may need to **refresh the page** to see the changes reflected in the header."
+                ),
+                "data": {"updated_fields": list(updates.keys())},
+            }
+
+        except Exception as e:
+            logger.error(f"UpdateProfileCommand error: {e}")
+            return {
+                "success": False,
+                "message": "Could not update your profile. Please try again or use the Profile page.",
+                "data": {},
+            }
+
+
 class RetractNominationCommand(BaseCommand):
     """Remove a specific peer from the user's current nominations for a cycle."""
     allowed_roles         = ['EMPLOYEE', 'MANAGER', 'HR_ADMIN', 'SUPER_ADMIN']

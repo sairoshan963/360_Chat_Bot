@@ -56,9 +56,11 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "get_employees",
             "description": (
-                "Fetch employees with name, email, role, department, status. "
+                "Fetch employees with name, email, role, department, job_title, status, manager. "
                 "Use when asked: 'how many employees', 'list engineering team', "
-                "'who are the managers', 'headcount by department'. "
+                "'who are the managers', 'headcount by department', "
+                "'show profile of X', 'details of user X@...com'. "
+                "Pass email to look up a specific person's profile. "
                 "NOT for task completion or feedback scores — use get_reviewer_tasks or get_scores. "
                 "For MANAGER role, automatically scoped to direct reports only."
             ),
@@ -76,6 +78,10 @@ TOOL_DEFINITIONS = [
                     "status": {
                         "type": "string",
                         "description": "Optional. ACTIVE or INACTIVE. Default ACTIVE.",
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Optional. Exact email to look up a specific user's profile.",
                     },
                 },
                 "required": [],
@@ -443,6 +449,7 @@ def execute_tool(name: str, arguments: dict, user) -> str:
                 arguments.get('department'),
                 arguments.get('status', 'ACTIVE'),
                 manager_id,
+                arguments.get('email'),
             )
         if name == 'get_nominations':
             return _get_nominations(
@@ -582,28 +589,24 @@ def _get_cycles(state=None):
     return json.dumps({"cycles": rows, "total": len(rows)})
 
 
-def _get_employees(role=None, department=None, status='ACTIVE', manager_id=None):
-    if manager_id:
-        params = [manager_id, status or 'ACTIVE']
-        extra = ""
-        if role:
-            extra += " AND u.role = %s"
-            params.append(role)
-        if department:
-            extra += " AND d.name ILIKE %s"
-            params.append(f'%{department}%')
-        sql = f"""
-            SELECT u.id, u.first_name || ' ' || u.last_name AS name,
-                   u.email, u.role, u.status, d.name AS department
-            FROM users u
-            JOIN org_hierarchy oh ON oh.employee_id = u.id AND oh.manager_id = %s
-            LEFT JOIN departments d ON u.department_id = d.id
-            WHERE u.status = %s {extra}
-            ORDER BY u.first_name LIMIT 100
-        """
+def _get_employees(role=None, department=None, status='ACTIVE', manager_id=None, email=None):
+    base_select = """
+        SELECT u.id, u.first_name || ' ' || u.last_name AS name,
+               u.email, u.role, u.status, d.name AS department,
+               u.job_title,
+               mgr.first_name || ' ' || mgr.last_name AS manager_name,
+               mgr.email AS manager_email
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        LEFT JOIN org_hierarchy oh ON oh.employee_id = u.id
+        LEFT JOIN users mgr ON oh.manager_id = mgr.id
+    """
+    cols = ['id', 'name', 'email', 'role', 'status', 'department', 'job_title', 'manager', 'manager_email']
+
+    if email:
+        # Exact email lookup — ignore all other filters, return single user profile
         with connection.cursor() as cur:
-            cur.execute(sql, params)
-            cols = ['id', 'name', 'email', 'role', 'status', 'department']
+            cur.execute(base_select + " WHERE u.email = %s", [email])
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             for r in rows:
                 r['id'] = str(r['id'])
@@ -617,17 +620,19 @@ def _get_employees(role=None, department=None, status='ACTIVE', manager_id=None)
     if department:
         extra += " AND d.name ILIKE %s"
         params.append(f'%{department}%')
-    sql = f"""
-        SELECT u.id, u.first_name || ' ' || u.last_name AS name,
-               u.email, u.role, u.status, d.name AS department
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.status = %s {extra}
-        ORDER BY u.first_name LIMIT 100
-    """
+
+    if manager_id:
+        sql = base_select + f"""
+            JOIN org_hierarchy oh2 ON oh2.employee_id = u.id AND oh2.manager_id = %s
+            WHERE u.status = %s {extra}
+            ORDER BY u.first_name LIMIT 100
+        """
+        params = [manager_id, status or 'ACTIVE'] + params[1:]
+    else:
+        sql = base_select + f" WHERE u.status = %s {extra} ORDER BY u.first_name LIMIT 100"
+
     with connection.cursor() as cur:
         cur.execute(sql, params)
-        cols = ['id', 'name', 'email', 'role', 'status', 'department']
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
             r['id'] = str(r['id'])

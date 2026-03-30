@@ -20,6 +20,7 @@ from .command_handlers import (
     RemindTeamCommand,
     ExportNominationsCommand,
     ShowMyProfileCommand,
+    ShowUserProfileCommand,
     ShowMyManagerCommand,
     ShowMyTeamCommand,
     WhenIsMyReviewDueCommand,
@@ -39,6 +40,7 @@ from .command_handlers import (
     RetractNominationCommand,
     CreateTemplateFromTextCommand,
     CreateTemplateFromPDFCommand,
+    UpdateProfileCommand,
 )
 
 # Maps intent name → command handler class
@@ -60,6 +62,7 @@ COMMAND_REGISTRY = {
     'show_announcements':     ShowAnnouncementsCommand,
     'show_audit_logs':        ShowAuditLogsCommand,
     'show_my_profile':        ShowMyProfileCommand,
+    'show_user_profile':      ShowUserProfileCommand,
     'show_my_manager':        ShowMyManagerCommand,
     'show_my_team':           ShowMyTeamCommand,
     'when_is_my_review_due':  WhenIsMyReviewDueCommand,
@@ -85,6 +88,7 @@ COMMAND_REGISTRY = {
     'approve_nomination':          ApproveNominationCommand,
     'reject_nomination':           RejectNominationCommand,
     'approve_all_nominations':     ApproveAllNominationsCommand,
+    'update_profile':              UpdateProfileCommand,
 }
 
 

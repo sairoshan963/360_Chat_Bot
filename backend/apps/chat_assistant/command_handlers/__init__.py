@@ -20,6 +20,7 @@ from .query_commands import (
     RemindTeamCommand,
     ExportNominationsCommand,
     ShowMyProfileCommand,
+    ShowUserProfileCommand,
     ShowMyManagerCommand,
     ShowMyTeamCommand,
     WhenIsMyReviewDueCommand,
@@ -42,6 +43,7 @@ from .action_commands import (
     RetractNominationCommand,
     CreateTemplateFromTextCommand,
     CreateTemplateFromPDFCommand,
+    UpdateProfileCommand,
 )
 
 __all__ = [
@@ -53,7 +55,7 @@ __all__ = [
     'ShowTemplatesCommand', 'ShowTeamNominationsCommand', 'ShowEmployeesCommand',
     'ShowAnnouncementsCommand', 'ShowAuditLogsCommand',
     'ShowPendingApprovalsCommand', 'ShowCycleResultsCommand', 'RemindTeamCommand', 'ExportNominationsCommand',
-    'ShowMyProfileCommand', 'ShowMyManagerCommand', 'ShowMyTeamCommand',
+    'ShowMyProfileCommand', 'ShowUserProfileCommand', 'ShowMyManagerCommand', 'ShowMyTeamCommand',
     'WhenIsMyReviewDueCommand', 'WhoHasNotSubmittedCommand', 'HelpCommand', 'SummarizeMyStatusCommand',
     # Action
     'CreateCycleCommand', 'CreateTemplateCommand', 'NominatePeersCommand',

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ChatMessageView, ChatStreamView, ChatHistoryView, ChatConfirmView, ChatSessionView, ChatAnalyticsView, ChatSessionsView, ChatSessionDetailView, ChatUploadView
+from .views import ChatMessageView, ChatStreamView, ChatHistoryView, ChatConfirmView, ChatSessionView, ChatAnalyticsView, ChatSessionsView, ChatSessionDetailView, ChatUploadView, MentionSearchView
 
 urlpatterns = [
     path('message/',                      ChatMessageView.as_view(),       name='chat-message'),
@@ -11,4 +11,5 @@ urlpatterns = [
     path('session/',                      ChatSessionView.as_view(),       name='chat-session'),
     path('analytics/',                    ChatAnalyticsView.as_view(),     name='chat-analytics'),
     path('upload/',                       ChatUploadView.as_view(),        name='chat-upload'),
+    path('mention-search/',               MentionSearchView.as_view(),     name='chat-mention-search'),
 ]
